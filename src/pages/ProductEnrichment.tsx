@@ -460,9 +460,24 @@ export default function ProductEnrichment({ addToast }: Props) {
     let done = 0
     let success = 0
     let failed = 0
-    const errors: EnrichmentProgress['failedQueue'] = []
+    const failedProducts: { product: ProductData; retryCount: number; error: string }[] = []
 
-    // Process in groups of concurrencyRef (adaptive)
+    // ─── Tek ürünü retry ile işle ───
+    const processWithRetry = async (product: ProductData, maxRetries = 3): Promise<boolean> => {
+      for (let attempt = 1; attempt <= maxRetries; attempt++) {
+        const ok = await processProduct(product)
+        if (ok) return true
+
+        if (attempt < maxRetries) {
+          const waitSec = attempt * 20 // 20s, 40s
+          log(`🔄 "${product.title.slice(0, 30)}..." — deneme ${attempt}/${maxRetries} başarısız, ${waitSec}s bekleniyor...`)
+          await new Promise((r) => setTimeout(r, waitSec * 1000))
+        }
+      }
+      return false
+    }
+
+    // ─── Ana döngü — adaptive concurrency ───
     let i = 0
     while (i < queue.length) {
       if (pauseRef.current) {
@@ -474,7 +489,7 @@ export default function ProductEnrichment({ addToast }: Props) {
       const batch = queue.slice(i, i + currentConcurrency)
       const results = await Promise.allSettled(
         batch.map(async (product) => {
-          const ok = await processProduct(product)
+          const ok = await processWithRetry(product)
           return { product, ok }
         })
       )
@@ -484,25 +499,27 @@ export default function ProductEnrichment({ addToast }: Props) {
         if (r.status === 'fulfilled' && r.value.ok) {
           success++
         } else {
-          failed++
           const p = r.status === 'fulfilled' ? r.value.product : batch[0]
           const errMsg = r.status === 'rejected' ? r.reason?.message : 'İşlem başarısız'
-          errors.push({ productId: p.id, title: p.title, error: errMsg, retryCount: 0 })
-          // Hatalı ürünü logla, devam et (circuit breaker YOK)
-          log(`⏭️ ${p.title.slice(0, 30)}... — atlandı, diğer ürünlerle devam ediliyor`)
+          failedProducts.push({ product: p, retryCount: 3, error: errMsg })
+          log(`⚠️ "${p.title.slice(0, 30)}..." — 3 deneme tükendi, son tur retry kuyruğuna eklendi`)
         }
       }
 
-      setProgress({ total: queue.length, done, success, failed })
-      setFailedQueue([...errors])
+      setProgress({ total: queue.length, done, success, failed: failedProducts.length })
+      setFailedQueue(failedProducts.map((f) => ({
+        productId: f.product.id, title: f.product.title, error: f.error, retryCount: f.retryCount,
+      })))
 
       // Save progress to localStorage
       const progressData: EnrichmentProgress = {
         cursor: null,
         processedIds: queue.slice(0, i + currentConcurrency).map((p) => p.id),
         successCount: success,
-        failedCount: failed,
-        failedQueue: errors,
+        failedCount: failedProducts.length,
+        failedQueue: failedProducts.map((f) => ({
+          productId: f.product.id, title: f.product.title, error: f.error, retryCount: f.retryCount,
+        })),
         startedAt: new Date().toISOString(),
         settings: { platforms, mode, visionEnabled },
       }
@@ -511,8 +528,39 @@ export default function ProductEnrichment({ addToast }: Props) {
       i += currentConcurrency
     }
 
+    // ─── Son tur: kalan hatalıları tekrar dene ───
+    if (failedProducts.length > 0 && !pauseRef.current) {
+      log(`♻️ ${failedProducts.length} hatalı ürün için son retry turu başlatılıyor (60s bekleme)...`)
+      await new Promise((r) => setTimeout(r, 60000))
+
+      const retryQueue = [...failedProducts]
+      failedProducts.length = 0 // temizle
+
+      for (const item of retryQueue) {
+        if (pauseRef.current) break
+
+        log(`♻️ "${item.product.title.slice(0, 30)}..." — son retry...`)
+        const ok = await processWithRetry(item.product, 2)
+        if (ok) {
+          success++
+          log(`✅ "${item.product.title.slice(0, 30)}..." — retry başarılı!`)
+        } else {
+          failed++
+          failedProducts.push(item)
+          log(`❌ "${item.product.title.slice(0, 30)}..." — tüm denemeler tükendi`)
+        }
+        setProgress({ total: queue.length, done: queue.length, success, failed })
+      }
+    } else {
+      failed = failedProducts.length
+    }
+
     if (!pauseRef.current) {
-      log(`🏁 Tamamlandı! ${success} başarılı, ${failed} hatalı`)
+      if (failed === 0) {
+        log(`🏁 Tamamlandı! ${success} ürün başarıyla işlendi — hiçbir ürün atlanmadı ✅`)
+      } else {
+        log(`🏁 Tamamlandı! ${success} başarılı, ${failed} ürün tüm denemelerde başarısız oldu`)
+      }
       localStorage.removeItem(STORAGE_KEY)
     }
 
