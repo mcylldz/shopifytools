@@ -248,31 +248,122 @@ export const handler: Handler = async (event) => {
       totalWritten += (data.metafieldsSet?.metafields?.length || 0)
     }
 
-    // BUG 1 FIX: Shopify native productCategory
-    // Önceki versiyondaki hata: Number.isInteger(string) = false
-    // Şimdi: parseInt ile sayıya çevir
+    // BUG 1 FIX v2: Shopify native productCategory
+    // Google taxonomy ID'ler Shopify'ın kendi taxonomy node ID'leri ile AYNI DEĞİLDİR.
+    // Strateji: product_type text'ini kullanarak Shopify taxonomy'de arama yap.
+    // Fallback: Google→Shopify mapping tablosu.
+    const productType = enrichment.google?.product_type || ''
     const rawCatId = enrichment.google?.google_product_category
-    const catId = typeof rawCatId === 'string' ? parseInt(rawCatId, 10) : rawCatId
-    if (catId && !isNaN(catId) && catId > 0) {
+
+    // Google taxonomy ID → Shopify taxonomy node ID mapping (en yaygın kategoriler)
+    const GOOGLE_TO_SHOPIFY: Record<number, string> = {
+      2271: 'gid://shopify/ProductTaxonomyNode/aa-3-2-5',  // Dresses
+      212: 'gid://shopify/ProductTaxonomyNode/aa-3-2-15',  // Tops (Bluzlar/Üstler)
+      3455: 'gid://shopify/ProductTaxonomyNode/aa-3-2-13', // Skirts (Etekler)
+      204: 'gid://shopify/ProductTaxonomyNode/aa-3-2-11',  // Pants (Pantolonlar)
+      3066: 'gid://shopify/ProductTaxonomyNode/aa-3-2-7',  // Outerwear (Ceketler)
+      179: 'gid://shopify/ProductTaxonomyNode/aa-1-1',     // Scarves (Atkı/Şal)
+      196: 'gid://shopify/ProductTaxonomyNode/aa-2-5-3',   // Necklaces (Kolye)
+      200: 'gid://shopify/ProductTaxonomyNode/aa-2-5-5',   // Rings (Yüzük)
+      194: 'gid://shopify/ProductTaxonomyNode/aa-2-5-1',   // Earrings (Küpe)
+      191: 'gid://shopify/ProductTaxonomyNode/aa-2-5-6',   // Bracelets (Bileklik)
+      6551: 'gid://shopify/ProductTaxonomyNode/aa-2-1',    // Handbags (Çanta)
+      5322: 'gid://shopify/ProductTaxonomyNode/aa-3-2-8',  // Jumpsuits (Tulum)
+      203: 'gid://shopify/ProductTaxonomyNode/aa-3-2-14',  // Suits (Takım)
+    }
+
+    if (rawCatId || productType) {
       try {
-        console.log(`[save] ${productId}: native productCategory → gid://shopify/ProductTaxonomyNode/${catId}`)
-        const catData = await graphqlFetch<any>(PRODUCT_UPDATE_MUTATION, {
-          input: {
-            id: productId,
-            productCategory: {
-              productTaxonomyNodeId: `gid://shopify/ProductTaxonomyNode/${catId}`,
+        // Önce taxonomy search dene
+        const TAXONOMY_SEARCH = `
+          query taxonomySearch($query: String!) {
+            taxonomy {
+              categories(first: 5, query: $query) {
+                edges {
+                  node {
+                    id
+                    fullName
+                    name
+                  }
+                }
+              }
+            }
+          }
+        `
+
+        // Arama terimi: product_type veya genel "Elbise", "Ceket" vs.
+        let searchTerm = ''
+        if (productType.includes('>')) {
+          // "Giyim > Elbiseler > Maxi Elbiseler" → son kısmı al
+          const parts = productType.split('>').map((s: string) => s.trim())
+          searchTerm = parts[parts.length - 1] || parts[parts.length - 2] || 'Dress'
+        } else {
+          searchTerm = productType || 'Dress'
+        }
+
+        // Türkçe → İngilizce dönüşüm
+        const TR_TO_EN: Record<string, string> = {
+          'elbise': 'Dresses', 'elbiseler': 'Dresses', 'maxi elbise': 'Dresses',
+          'kısa elbise': 'Dresses', 'mini elbise': 'Dresses', 'uzun elbise': 'Dresses',
+          'bluz': 'Tops', 'üstler': 'Tops', 'gömlek': 'Shirts',
+          'etek': 'Skirts', 'etekler': 'Skirts',
+          'pantolon': 'Pants', 'pantolonlar': 'Pants',
+          'ceket': 'Outerwear', 'ceketler': 'Outerwear', 'mont': 'Outerwear',
+          'hırka': 'Sweaters', 'triko': 'Sweaters',
+          'tulum': 'Jumpsuits', 'takım': 'Suits',
+          'çanta': 'Handbags', 'kolye': 'Necklaces',
+          'küpe': 'Earrings', 'yüzük': 'Rings', 'bileklik': 'Bracelets',
+          'atkı': 'Scarves', 'şal': 'Scarves',
+        }
+
+        const normalized = searchTerm.toLowerCase()
+        const enTerm = TR_TO_EN[normalized] || searchTerm
+
+        console.log(`[save] ${productId}: taxonomy search → "${enTerm}" (original: "${searchTerm}")`)
+
+        let taxonomyNodeId: string | null = null
+
+        try {
+          const taxData = await graphqlFetch<any>(TAXONOMY_SEARCH, { query: enTerm })
+          const edges = taxData.taxonomy?.categories?.edges || []
+          if (edges.length > 0) {
+            taxonomyNodeId = edges[0].node.id
+            console.log(`[save] ${productId}: taxonomy found: ${edges[0].node.fullName} (${taxonomyNodeId})`)
+          }
+        } catch (searchErr: any) {
+          console.log(`[save] ${productId}: taxonomy search hatası: ${searchErr.message}, fallback mappping denenecek`)
+        }
+
+        // Fallback: Google→Shopify mapping
+        if (!taxonomyNodeId && rawCatId) {
+          const catId = typeof rawCatId === 'string' ? parseInt(rawCatId, 10) : rawCatId
+          if (catId && GOOGLE_TO_SHOPIFY[catId]) {
+            taxonomyNodeId = GOOGLE_TO_SHOPIFY[catId]
+            console.log(`[save] ${productId}: Google→Shopify mapping: ${catId} → ${taxonomyNodeId}`)
+          }
+        }
+
+        if (taxonomyNodeId) {
+          const catData = await graphqlFetch<any>(PRODUCT_UPDATE_MUTATION, {
+            input: {
+              id: productId,
+              productCategory: {
+                productTaxonomyNodeId: taxonomyNodeId,
+              },
             },
-          },
-        })
-        const catErrors = catData.productUpdate?.userErrors || []
-        if (catErrors.length > 0) {
-          for (const ce of catErrors) {
-            console.error(`[save] productCategory hatası: ${ce.field}: ${ce.message}`)
-            errors.push(`productCategory: ${ce.message}`)
+          })
+          const catErrors = catData.productUpdate?.userErrors || []
+          if (catErrors.length > 0) {
+            for (const ce of catErrors) {
+              console.error(`[save] productCategory hatası: ${ce.field}: ${ce.message}`)
+              errors.push(`productCategory: ${ce.message}`)
+            }
+          } else {
+            const fullName = catData.productUpdate?.product?.productCategory?.productTaxonomyNode?.fullName
+            console.log(`[save] ${productId}: productCategory başarılı: ${fullName}`)
           }
         } else {
-          const fullName = catData.productUpdate?.product?.productCategory?.productTaxonomyNode?.fullName
-          console.log(`[save] ${productId}: productCategory başarılı: ${fullName}`)
+          console.log(`[save] ${productId}: taxonomy node bulunamadı — productCategory atlandı`)
         }
       } catch (catErr: any) {
         console.error(`[save] productCategory exception: ${catErr.message}`)

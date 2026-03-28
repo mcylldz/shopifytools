@@ -130,14 +130,30 @@ export const handler: Handler = async (event) => {
       }
     }
 
-    console.log(`[meta-sync] Başarılı: ${JSON.stringify(result)}`)
+    // Meta batch API validation_status kontrolü
+    // API 200 dönüp ama per-item validation hatası verebilir
+    const handles = result.handles || []
+    const validationErrors: string[] = []
+    
+    if (Array.isArray(handles)) {
+      for (const handle of handles) {
+        if (handle.status === 'error' || handle.errors?.length > 0) {
+          const errs = (handle.errors || []).map((e: any) => e.message || JSON.stringify(e)).join('; ')
+          validationErrors.push(`retailer_id=${handle.retailer_id}: ${errs}`)
+          console.error(`[meta-sync] Validation error: retailer_id=${handle.retailer_id}: ${errs}`)
+        }
+      }
+    }
+
+    console.log(`[meta-sync] Response: ${JSON.stringify(result).substring(0, 500)}`)
 
     return {
       statusCode: 200,
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        success: true,
+        success: validationErrors.length === 0,
         handles: result,
+        validationErrors: validationErrors.length > 0 ? validationErrors : undefined,
       }),
     }
   } catch (err: any) {
