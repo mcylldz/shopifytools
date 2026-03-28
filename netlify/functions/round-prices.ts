@@ -40,8 +40,8 @@ export const handler: Handler = async (event) => {
     const token = await getAccessToken()
     const results: { id: string; success: boolean; error?: string }[] = []
 
-    // 10'luk batch'ler halinde işle (rate limit koruması)
-    const batchSize = 10
+    // 25'lik batch'ler halinde paralel işle
+    const batchSize = 25
     for (let i = 0; i < variants.length; i += batchSize) {
       const batch = variants.slice(i, i + batchSize)
 
@@ -76,9 +76,8 @@ export const handler: Handler = async (event) => {
         })
       )
 
-      // Batch'ler arası küçük bekleme
       if (i + batchSize < variants.length) {
-        await new Promise((r) => setTimeout(r, 500))
+        await new Promise((r) => setTimeout(r, 200))
       }
     }
 
@@ -88,7 +87,7 @@ export const handler: Handler = async (event) => {
     return {
       statusCode: 200,
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ results, successCount, failCount }),
+      body: JSON.stringify({ successCount, failCount }),
     }
   } catch (err: any) {
     return {
