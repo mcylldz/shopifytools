@@ -23,11 +23,10 @@ export const handler: Handler = async (event) => {
     if (status !== 'any') qs.set('status', status)
 
     let allProducts: unknown[] = []
-    let pageUrl = `/products.json?${qs.toString()}`
+    let nextUrl: string | null = `https://${SHOPIFY_DOMAIN}/admin/api/2025-01/products.json?${qs.toString()}`
 
-    while (pageUrl) {
-      const url = `https://${SHOPIFY_DOMAIN}/admin/api/2024-01${pageUrl}`
-      const res = await fetch(url, {
+    while (nextUrl) {
+      const res: Response = await fetch(nextUrl, {
         headers: {
           'Content-Type': 'application/json',
           'X-Shopify-Access-Token': token,
@@ -35,21 +34,17 @@ export const handler: Handler = async (event) => {
       })
 
       if (!res.ok) {
-        const text = await res.text()
+        const text: string = await res.text()
         throw new Error(`Shopify API hatası (${res.status}): ${text}`)
       }
 
       const data = await res.json()
       allProducts = allProducts.concat(data.products || [])
 
-      const linkHeader = res.headers.get('Link') || ''
-      const nextMatch = linkHeader.match(/<([^>]+)>;\s*rel="next"/)
-      if (nextMatch) {
-        const urlObj = new URL(nextMatch[1])
-        pageUrl = urlObj.pathname + urlObj.search
-      } else {
-        pageUrl = ''
-      }
+      // Shopify Link header tam URL döndürür — doğrudan kullan
+      const linkHeader: string = res.headers.get('Link') || ''
+      const nextMatch: RegExpMatchArray | null = linkHeader.match(/<([^>]+)>;\s*rel="next"/)
+      nextUrl = nextMatch ? nextMatch[1] : null
     }
 
     // Etiket filtresi

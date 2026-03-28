@@ -47,7 +47,7 @@ export const handler: Handler = async (event) => {
 
       await Promise.all(
         batch.map(async (variant) => {
-          const url = `https://${SHOPIFY_DOMAIN}/admin/api/2024-01/variants/${variant.id}.json`
+          const url = `https://${SHOPIFY_DOMAIN}/admin/api/2025-01/variants/${variant.id}.json`
           try {
             const res = await fetch(url, {
               method: 'PUT',
