@@ -148,7 +148,7 @@ export default function PriceRounder({ addToast }: Props) {
     setResultMsg(null)
     setProgress(0)
 
-    const BATCH_SIZE = 10
+    const BATCH_SIZE = 20
     let totalSuccess = 0
     let totalFail = 0
 
