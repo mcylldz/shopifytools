@@ -1,43 +1,75 @@
 import type { Handler } from '@netlify/functions'
 import { graphqlFetch } from './shopify-auth'
 
-// Shopify ProductInput schema introspection
 export const handler: Handler = async (event) => {
   try {
-    // 1. ProductInput fields — productCategory var mı?
-    const inputFields = await graphqlFetch<any>(`{
-      __type(name: "ProductInput") {
-        name
-        inputFields { name type { name kind ofType { name kind } } }
-      }
-    }`)
-
-    const fields = inputFields.__type?.inputFields || []
-    const catRelated = fields.filter((f: any) =>
-      f.name.toLowerCase().includes('categ') || f.name.toLowerCase().includes('taxon')
-    )
-    const allFieldNames = fields.map((f: any) => f.name)
-
-    // 2. productSet mutation var mı?
-    const mutationCheck = await graphqlFetch<any>(`{
-      __schema {
-        mutationType {
-          fields { name }
+    // Apparel & Accessories altını çek (aa = Apparel & Accessories)
+    const data = await graphqlFetch<any>(`{
+      taxonomy {
+        categories(first: 250) {
+          nodes {
+            id
+            name
+            fullName
+            level
+            ancestorIds
+            childrenIds
+          }
         }
       }
     }`)
-    const mutations = mutationCheck.__schema?.mutationType?.fields?.map((f: any) => f.name) || []
-    const catMutations = mutations.filter((n: string) =>
-      n.toLowerCase().includes('categ') || n.toLowerCase().includes('product')
-    )
+
+    const allNodes = data.taxonomy?.categories?.nodes || []
+    
+    // Apparel & Accessories GID'si: gid://shopify/TaxonomyCategory/aa
+    // Tüm child kategorileri listele — ama API sadece first:250 dönüyor
+    // Daha spesifik: childrenIds kullanarak aa altını bul
+    
+    const apparelNode = allNodes.find((n: any) => n.id === 'gid://shopify/TaxonomyCategory/aa')
+    const childIds = apparelNode?.childrenIds || []
+
+    // Şimdi childrenIds'ları çek
+    const childQueries = childIds.slice(0, 20).map((id: string, i: number) => {
+      const alias = `c${i}`
+      return `${alias}: node(id: "${id}") { ... on TaxonomyCategory { id name fullName childrenIds } }`
+    }).join('\n')
+
+    const childData = await graphqlFetch<any>(`{ ${childQueries} }`)
+    
+    // Her child'ın da çocuklarını çek
+    const level2Ids: string[] = []
+    const level2Results: any[] = []
+    
+    for (const key of Object.keys(childData)) {
+      const node = childData[key]
+      if (node) {
+        level2Results.push({ id: node.id, name: node.name, fullName: node.fullName })
+        if (node.childrenIds) level2Ids.push(...node.childrenIds)
+      }
+    }
+
+    // Level 3 — clothing sub-subcategories (Dresses, Tops, etc.)
+    const l3Queries = level2Ids.slice(0, 50).map((id: string, i: number) => {
+      const alias = `l${i}`
+      return `${alias}: node(id: "${id}") { ... on TaxonomyCategory { id name fullName childrenIds } }`
+    }).join('\n')
+
+    let level3Results: any[] = []
+    if (l3Queries) {
+      const l3Data = await graphqlFetch<any>(`{ ${l3Queries} }`)
+      for (const key of Object.keys(l3Data)) {
+        const node = l3Data[key]
+        if (node) level3Results.push({ id: node.id, name: node.name, fullName: node.fullName })
+      }
+    }
 
     return {
       statusCode: 200,
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        productInputFields: allFieldNames,
-        categoryRelatedFields: catRelated,
-        categoryRelatedMutations: catMutations,
+        apparelChildrenCount: childIds.length,
+        level2: level2Results,
+        level3: level3Results,
       }, null, 2),
     }
   } catch (err: any) {

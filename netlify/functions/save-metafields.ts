@@ -251,121 +251,114 @@ export const handler: Handler = async (event) => {
       totalWritten += (data.metafieldsSet?.metafields?.length || 0)
     }
 
-    // BUG 1 FIX v2: Shopify native productCategory
-    // Google taxonomy ID'ler Shopify'ın kendi taxonomy node ID'leri ile AYNI DEĞİLDİR.
-    // Strateji: product_type text'ini kullanarak Shopify taxonomy'de arama yap.
-    // Fallback: Google→Shopify mapping tablosu.
+    // BUG 1 FIX v6 — FINAL
+    // GID format: gid://shopify/TaxonomyCategory/xx (NOT ProductTaxonomyNode)
+    // Taxonomy search API'si query parametresini desteklemiyor.
+    // Çözüm: product_type text → keyword matching → doğru TaxonomyCategory GID
     const productType = enrichment.google?.product_type || ''
     const rawCatId = enrichment.google?.google_product_category
 
-    // Google taxonomy ID → Shopify taxonomy node ID mapping (en yaygın kategoriler)
-    const GOOGLE_TO_SHOPIFY: Record<number, string> = {
-      2271: 'gid://shopify/ProductTaxonomyNode/aa-3-2-5',  // Dresses
-      212: 'gid://shopify/ProductTaxonomyNode/aa-3-2-15',  // Tops (Bluzlar/Üstler)
-      3455: 'gid://shopify/ProductTaxonomyNode/aa-3-2-13', // Skirts (Etekler)
-      204: 'gid://shopify/ProductTaxonomyNode/aa-3-2-11',  // Pants (Pantolonlar)
-      3066: 'gid://shopify/ProductTaxonomyNode/aa-3-2-7',  // Outerwear (Ceketler)
-      179: 'gid://shopify/ProductTaxonomyNode/aa-1-1',     // Scarves (Atkı/Şal)
-      196: 'gid://shopify/ProductTaxonomyNode/aa-2-5-3',   // Necklaces (Kolye)
-      200: 'gid://shopify/ProductTaxonomyNode/aa-2-5-5',   // Rings (Yüzük)
-      194: 'gid://shopify/ProductTaxonomyNode/aa-2-5-1',   // Earrings (Küpe)
-      191: 'gid://shopify/ProductTaxonomyNode/aa-2-5-6',   // Bracelets (Bileklik)
-      6551: 'gid://shopify/ProductTaxonomyNode/aa-2-1',    // Handbags (Çanta)
-      5322: 'gid://shopify/ProductTaxonomyNode/aa-3-2-8',  // Jumpsuits (Tulum)
-      203: 'gid://shopify/ProductTaxonomyNode/aa-3-2-14',  // Suits (Takım)
+    // Shopify Taxonomy GID'leri (introspection ile doğrulanmış — 2025-01)
+    const TAXONOMY: Record<string, string> = {
+      // Clothing (aa-1-*)
+      'dresses':    'gid://shopify/TaxonomyCategory/aa-1-4',
+      'tops':       'gid://shopify/TaxonomyCategory/aa-1-13',
+      'skirts':     'gid://shopify/TaxonomyCategory/aa-1-15',
+      'pants':      'gid://shopify/TaxonomyCategory/aa-1-12',
+      'outerwear':  'gid://shopify/TaxonomyCategory/aa-1-10',
+      'one-pieces': 'gid://shopify/TaxonomyCategory/aa-1-9',
+      'suits':      'gid://shopify/TaxonomyCategory/aa-1-19',
+      'shorts':     'gid://shopify/TaxonomyCategory/aa-1-14',
+      'swimwear':   'gid://shopify/TaxonomyCategory/aa-1-20',
+      'lingerie':   'gid://shopify/TaxonomyCategory/aa-1-6',
+      'activewear': 'gid://shopify/TaxonomyCategory/aa-1-1',
+      // Accessories (aa-2-*)
+      'scarves':    'gid://shopify/TaxonomyCategory/aa-2-26',
+      'belts':      'gid://shopify/TaxonomyCategory/aa-2-6',
+      'hats':       'gid://shopify/TaxonomyCategory/aa-2-17',
+      'sunglasses': 'gid://shopify/TaxonomyCategory/aa-2-27',
+      'gloves':     'gid://shopify/TaxonomyCategory/aa-2-13',
+      'hair':       'gid://shopify/TaxonomyCategory/aa-2-14',
     }
+
+    // Google taxonomy ID → Shopify TaxonomyCategory mapping
+    const GOOGLE_TO_SHOPIFY: Record<number, string> = {
+      2271: TAXONOMY['dresses'],
+      212:  TAXONOMY['tops'],
+      3455: TAXONOMY['skirts'],
+      204:  TAXONOMY['pants'],
+      3066: TAXONOMY['outerwear'],
+      5322: TAXONOMY['one-pieces'],   // Jumpsuits → One-Pieces
+      203:  TAXONOMY['suits'],
+      179:  TAXONOMY['scarves'],
+    }
+
+    // Türkçe product_type → İngilizce keyword mapping
+    const KEYWORD_MAP: [RegExp, string][] = [
+      [/elbise|dress/i,      'dresses'],
+      [/bluz|blouse|top|üst/i, 'tops'],
+      [/gömlek|shirt/i,      'tops'],
+      [/etek|skirt/i,        'skirts'],
+      [/pantolon|pant|trousers/i, 'pants'],
+      [/ceket|jacket|blazer|coat|mont|kaban/i, 'outerwear'],
+      [/hırka|cardigan|kazak|sweater|triko/i, 'outerwear'],
+      [/tulum|jumpsuit|romper/i, 'one-pieces'],
+      [/takım|suit/i,        'suits'],
+      [/şort|short/i,        'shorts'],
+      [/mayo|bikini|swim/i,  'swimwear'],
+      [/iç çamaşır|lingerie/i, 'lingerie'],
+      [/atkı|şal|scarf|shawl/i, 'scarves'],
+      [/kemer|belt/i,        'belts'],
+      [/şapka|hat/i,         'hats'],
+      [/çanta|bag|handbag/i, 'dresses'], // fallback — Luggage & Bags farklı top-level
+    ]
 
     if (rawCatId || productType) {
       try {
-        // Önce taxonomy search dene
-        const TAXONOMY_SEARCH = `
-          query taxonomySearch($query: String!) {
-            taxonomy {
-              categories(first: 5, query: $query) {
-                edges {
-                  node {
-                    id
-                    fullName
-                    name
-                  }
-                }
-              }
-            }
-          }
-        `
-
-        // Arama terimi: product_type veya genel "Elbise", "Ceket" vs.
-        let searchTerm = ''
-        if (productType.includes('>')) {
-          // "Giyim > Elbiseler > Maxi Elbiseler" → son kısmı al
-          const parts = productType.split('>').map((s: string) => s.trim())
-          searchTerm = parts[parts.length - 1] || parts[parts.length - 2] || 'Dress'
-        } else {
-          searchTerm = productType || 'Dress'
-        }
-
-        // Türkçe → İngilizce dönüşüm
-        const TR_TO_EN: Record<string, string> = {
-          'elbise': 'Dresses', 'elbiseler': 'Dresses', 'maxi elbise': 'Dresses',
-          'kısa elbise': 'Dresses', 'mini elbise': 'Dresses', 'uzun elbise': 'Dresses',
-          'bluz': 'Tops', 'üstler': 'Tops', 'gömlek': 'Shirts',
-          'etek': 'Skirts', 'etekler': 'Skirts',
-          'pantolon': 'Pants', 'pantolonlar': 'Pants',
-          'ceket': 'Outerwear', 'ceketler': 'Outerwear', 'mont': 'Outerwear',
-          'hırka': 'Sweaters', 'triko': 'Sweaters',
-          'tulum': 'Jumpsuits', 'takım': 'Suits',
-          'çanta': 'Handbags', 'kolye': 'Necklaces',
-          'küpe': 'Earrings', 'yüzük': 'Rings', 'bileklik': 'Bracelets',
-          'atkı': 'Scarves', 'şal': 'Scarves',
-        }
-
-        const normalized = searchTerm.toLowerCase()
-        const enTerm = TR_TO_EN[normalized] || searchTerm
-
-        console.log(`[save] ${productId}: taxonomy search → "${enTerm}" (original: "${searchTerm}")`)
-
         let taxonomyNodeId: string | null = null
 
-        try {
-          const taxData = await graphqlFetch<any>(TAXONOMY_SEARCH, { query: enTerm })
-          const edges = taxData.taxonomy?.categories?.edges || []
-          if (edges.length > 0) {
-            taxonomyNodeId = edges[0].node.id
-            console.log(`[save] ${productId}: taxonomy found: ${edges[0].node.fullName} (${taxonomyNodeId})`)
-          }
-        } catch (searchErr: any) {
-          console.log(`[save] ${productId}: taxonomy search hatası: ${searchErr.message}, fallback mappping denenecek`)
-        }
-
-        // Fallback: Google→Shopify mapping
-        if (!taxonomyNodeId && rawCatId) {
+        // 1. Google ID mapping dene
+        if (rawCatId) {
           const catId = typeof rawCatId === 'string' ? parseInt(rawCatId, 10) : rawCatId
           if (catId && GOOGLE_TO_SHOPIFY[catId]) {
             taxonomyNodeId = GOOGLE_TO_SHOPIFY[catId]
-            console.log(`[save] ${productId}: Google→Shopify mapping: ${catId} → ${taxonomyNodeId}`)
+            console.log(`[save] ${productId}: Google→Shopify: ${catId} → ${taxonomyNodeId}`)
           }
         }
 
-        if (taxonomyNodeId) {
-          console.log(`[save] ${productId}: category = ${taxonomyNodeId}`)
-          const catData = await graphqlFetch<any>(PRODUCT_CATEGORY_MUTATION, {
-            input: {
-              id: productId,
-              category: taxonomyNodeId,
-            },
-          })
-          const catErrors = catData.productUpdate?.userErrors || []
-          if (catErrors.length > 0) {
-            for (const ce of catErrors) {
-              console.error(`[save] category hatası: ${ce.field}: ${ce.message}`)
-              errors.push(`category: ${ce.message}`)
+        // 2. product_type keyword matching
+        if (!taxonomyNodeId && productType) {
+          for (const [regex, key] of KEYWORD_MAP) {
+            if (regex.test(productType)) {
+              taxonomyNodeId = TAXONOMY[key]
+              console.log(`[save] ${productId}: keyword match: "${productType}" → ${key} → ${taxonomyNodeId}`)
+              break
             }
-          } else {
-            const cat = catData.productUpdate?.product?.category
-            console.log(`[save] ${productId}: category başarılı: ${cat?.fullName || cat?.name}`)
+          }
+        }
+
+        // 3. Fallback: default Dresses (kadın moda mağazası)
+        if (!taxonomyNodeId) {
+          taxonomyNodeId = TAXONOMY['dresses']
+          console.log(`[save] ${productId}: fallback → Dresses → ${taxonomyNodeId}`)
+        }
+
+        console.log(`[save] ${productId}: category = ${taxonomyNodeId}`)
+        const catData = await graphqlFetch<any>(PRODUCT_CATEGORY_MUTATION, {
+          input: {
+            id: productId,
+            category: taxonomyNodeId,
+          },
+        })
+        const catErrors = catData.productUpdate?.userErrors || []
+        if (catErrors.length > 0) {
+          for (const ce of catErrors) {
+            console.error(`[save] category hatası: ${ce.field}: ${ce.message}`)
+            errors.push(`category: ${ce.message}`)
           }
         } else {
-          console.log(`[save] ${productId}: taxonomy node bulunamadı — productCategory atlandı`)
+          const cat = catData.productUpdate?.product?.category
+          console.log(`[save] ${productId}: category başarılı: ${cat?.fullName || cat?.name}`)
         }
       } catch (catErr: any) {
         console.error(`[save] productCategory exception: ${catErr.message}`)
