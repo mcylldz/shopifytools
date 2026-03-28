@@ -14,11 +14,10 @@ const METAFIELDS_SET_MUTATION = `
   }
 `
 
-// BUG 1 FIX v3: productChangeCategory — ayrı mutation
-// productCategory, ProductInput içinde DEĞİL, ayrı mutation ile set edilir
-const PRODUCT_CHANGE_CATEGORY_MUTATION = `
-  mutation productChangeCategory($productId: ID!, $taxonomyNodeId: ID!) {
-    productChangeCategory(productId: $productId, taxonomyNodeId: $taxonomyNodeId) {
+// BUG 1 FIX v4: productUpdate with nested productCategory
+const PRODUCT_CATEGORY_MUTATION = `
+  mutation productUpdate($input: ProductInput!) {
+    productUpdate(input: $input) {
       product {
         id
         productCategory {
@@ -349,18 +348,22 @@ export const handler: Handler = async (event) => {
         }
 
         if (taxonomyNodeId) {
-          const catData = await graphqlFetch<any>(PRODUCT_CHANGE_CATEGORY_MUTATION, {
-            productId: productId,
-            taxonomyNodeId: taxonomyNodeId,
+          const catData = await graphqlFetch<any>(PRODUCT_CATEGORY_MUTATION, {
+            input: {
+              id: productId,
+              productCategory: {
+                productTaxonomyNodeId: taxonomyNodeId,
+              },
+            },
           })
-          const catErrors = catData.productChangeCategory?.userErrors || []
+          const catErrors = catData.productUpdate?.userErrors || []
           if (catErrors.length > 0) {
             for (const ce of catErrors) {
               console.error(`[save] productCategory hatası: ${ce.field}: ${ce.message}`)
               errors.push(`productCategory: ${ce.message}`)
             }
           } else {
-            const fullName = catData.productChangeCategory?.product?.productCategory?.productTaxonomyNode?.fullName
+            const fullName = catData.productUpdate?.product?.productCategory?.productTaxonomyNode?.fullName
             console.log(`[save] ${productId}: productCategory başarılı: ${fullName}`)
           }
         } else {

@@ -89,12 +89,7 @@ export const handler: Handler = async (event) => {
       if (e.custom_label_2) data.custom_label_2 = e.custom_label_2
       if (e.custom_label_3) data.custom_label_3 = e.custom_label_3
       if (e.custom_label_4) data.custom_label_4 = e.custom_label_4
-      // shipping_weight: birleşik string "300 g" formatında
-      if (e.shipping_weight_value && e.shipping_weight_unit) {
-        data.shipping_weight = `${e.shipping_weight_value} ${e.shipping_weight_unit}`
-      }
-      // KALDIRILDI: short_description, shipping_weight_value, shipping_weight_unit, return_policy_days
-      // (Meta bu field isimlerini tanımıyor)
+      // shipping_weight: Meta bunu Shopify'dan kendi alıyor, göndermiyoruz
 
       return {
         method: 'UPDATE',
