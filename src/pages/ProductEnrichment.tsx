@@ -362,6 +362,7 @@ export default function ProductEnrichment({ addToast }: Props) {
 
       const g = result.google || {}
       const m = result.meta || {}
+      let metaOk = true
       const metaItems = product.variants.map((v) => ({
         retailer_id: v.numericId,
         enrichment: {
@@ -399,15 +400,18 @@ export default function ProductEnrichment({ addToast }: Props) {
         } else if (mData.success) {
           log(`✅ ${label} — Meta Catalog sync başarılı`)
         } else {
+          metaOk = false
           log(`⚠️ ${label} — Meta sync: ${mData.error || 'bilinmeyen hata'}`)
         }
       } catch {
+        metaOk = false
         log(`⚠️ ${label} — Meta sync hatası, Shopify kaydı korundu`)
       }
 
       // Step 5: Google Merchant API sync
       if (pauseRef.current) return true
 
+      let googleOk = true
       const googleItems = product.variants.map((v) => ({
         productId: product.numericId,
         variantId: v.numericId,
@@ -442,13 +446,31 @@ export default function ProductEnrichment({ addToast }: Props) {
         } else if (gData.success) {
           log(`✅ ${label} — Google Merchant sync başarılı (${gData.successCount}/${gData.total} variant)`)
         } else {
+          googleOk = false
           log(`⚠️ ${label} — Google sync: ${gData.successCount || 0}/${gData.total || 0} başarılı${gData.errors?.length ? ` — ${gData.errors[0]?.error}` : ''}`)
         }
       } catch {
+        googleOk = false
         log(`⚠️ ${label} — Google sync hatası, Shopify + Meta kayıtları korundu`)
       }
 
-      return true
+      // Step 6: "enriched" tag — sadece TÜM adımlar başarılıysa
+      if (metaOk && googleOk) {
+        try {
+          await fetch('/api/add-tags', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ productId: product.id, tags: ['enriched'] }),
+          })
+          log(`🏷️ ${label} — "enriched" tag eklendi`)
+        } catch {
+          log(`⚠️ ${label} — tag eklenemedi`)
+        }
+      } else {
+        log(`⏭️ ${label} — Sync hataları var, "enriched" tag atlanıyor (tekrar denenecek)`)
+      }
+
+      return metaOk && googleOk
     } catch (err: any) {
       log(`❌ ${label} — Hata: ${err.message}`)
       return false
