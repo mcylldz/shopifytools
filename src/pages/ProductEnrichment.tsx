@@ -293,6 +293,15 @@ export default function ProductEnrichment({ addToast }: Props) {
           enrichment: result,
           updateTitle: mode === 'overwrite',
           updateDescription: mode === 'overwrite' || !product.descriptionHtml || product.descriptionHtml.length < 200,
+          productData: {
+            variants: product.variants.map((v) => ({
+              id: v.id,
+              price: v.price,
+              compareAtPrice: v.compareAtPrice,
+              options: v.options,
+              selectedOptions: v.options,
+            })),
+          },
         }),
       })
       const sData = await sRes.json()
