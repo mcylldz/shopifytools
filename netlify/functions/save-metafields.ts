@@ -28,6 +28,16 @@ const PRODUCT_CATEGORY_MUTATION = `
   }
 `
 
+// Finish tag mutation
+const TAGS_ADD_MUTATION = `
+  mutation tagsAdd($id: ID!, $tags: [String!]!) {
+    tagsAdd(id: $id, tags: $tags) {
+      node { id }
+      userErrors { field message }
+    }
+  }
+`
+
 interface MetafieldInput {
   ownerId: string
   namespace: string
@@ -221,6 +231,7 @@ export const handler: Handler = async (event) => {
   let updateTitle: boolean
   let updateDescription: boolean
   let productData: any
+  let addFinishTag: boolean
   try {
     const body = JSON.parse(event.body || '{}')
     productId = body.productId
@@ -228,6 +239,7 @@ export const handler: Handler = async (event) => {
     updateTitle = body.updateTitle ?? false
     updateDescription = body.updateDescription ?? false
     productData = body.productData || null
+    addFinishTag = body.addFinishTag ?? true
     if (!productId || !enrichment) throw new Error('productId ve enrichment gerekli')
   } catch (e: any) {
     return { statusCode: 400, body: JSON.stringify({ error: e.message }) }
@@ -394,6 +406,16 @@ export const handler: Handler = async (event) => {
           }
         `
         await graphqlFetch(mutation, { id: productId, ...updateValues })
+      }
+    }
+
+    // Finish tag ekle
+    if (addFinishTag) {
+      try {
+        await graphqlFetch(TAGS_ADD_MUTATION, { id: productId, tags: ['enriched'] })
+        console.log(`[save] ${productId}: "enriched" tag eklendi`)
+      } catch (tagErr: any) {
+        console.error(`[save] tag ekleme hatası: ${tagErr.message}`)
       }
     }
 

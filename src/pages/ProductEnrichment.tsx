@@ -67,6 +67,8 @@ export default function ProductEnrichment({ addToast }: Props) {
   const [selectedCollection, setSelectedCollection] = useState('')
   const [enrichmentFilter, setEnrichmentFilter] = useState('all')
   const [collections, setCollections] = useState<{ id: string; title: string; productsCount: number }[]>([])
+  const [excludeTagInput, setExcludeTagInput] = useState('')
+  const [excludeTags, setExcludeTags] = useState<string[]>(['enriched'])
 
   // Products
   const [products, setProducts] = useState<ProductData[]>([])
@@ -149,8 +151,20 @@ export default function ProductEnrichment({ addToast }: Props) {
         after = data.pageInfo?.hasNextPage ? data.pageInfo.endCursor : null
       } while (after)
 
-      setProducts(allProducts)
-      addToast({ type: 'info', message: `${allProducts.length} ürün bulundu.` })
+      // Hariç tutulacak etiketlerle filtrele
+      let filtered = allProducts
+      if (excludeTags.length > 0) {
+        filtered = allProducts.filter((p) => {
+          const pTags = (p.tags || []).map((t: string) => t.toLowerCase())
+          return !excludeTags.some((et) => pTags.includes(et.toLowerCase()))
+        })
+        if (filtered.length < allProducts.length) {
+          addToast({ type: 'info', message: `${allProducts.length - filtered.length} ürün hariç tutuldu (etiket filtresi)` })
+        }
+      }
+
+      setProducts(filtered)
+      addToast({ type: 'info', message: `${filtered.length} ürün bulundu.` })
     } catch (err: any) {
       addToast({ type: 'error', message: err.message })
     } finally {
@@ -167,6 +181,12 @@ export default function ProductEnrichment({ addToast }: Props) {
     setTagInput('')
   }
   const removeTag = (tag: string) => setSelectedTags((prev) => prev.filter((t) => t !== tag))
+  const addExcludeTag = () => {
+    const t = excludeTagInput.trim().toLowerCase()
+    if (t && !excludeTags.includes(t)) setExcludeTags((prev) => [...prev, t])
+    setExcludeTagInput('')
+  }
+  const removeExcludeTag = (tag: string) => setExcludeTags((prev) => prev.filter((t) => t !== tag))
 
   // ─── Selection ───
   const toggleSelect = (id: string) => {
@@ -730,6 +750,30 @@ export default function ProductEnrichment({ addToast }: Props) {
                 <option value="missing">Eksik alanları olanlar</option>
                 <option value="error">Hatalı olanlar</option>
               </select>
+            </div>
+          </div>
+
+          {/* Exclude Tags */}
+          <div className="form-row" style={{ marginBottom: 16 }}>
+            <div className="form-group" style={{ flex: 2 }}>
+              <label className="form-label">🚫 Hariç Tutulacak Etiketler</label>
+              <div style={{ display: 'flex', gap: 8 }}>
+                <input className="form-input" placeholder="Tag yazın + Enter"
+                  value={excludeTagInput}
+                  onChange={(e) => setExcludeTagInput(e.target.value)}
+                  onKeyDown={(e) => e.key === 'Enter' && (e.preventDefault(), addExcludeTag())} />
+                <button className="btn btn-sm" onClick={addExcludeTag}>Ekle</button>
+              </div>
+              {excludeTags.length > 0 && (
+                <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 8 }}>
+                  {excludeTags.map((t) => (
+                    <span key={t} className="tag-chip" style={{ background: 'var(--danger)', color: '#fff' }}>
+                      {t} <button onClick={() => removeExcludeTag(t)} style={{ color: '#fff' }}>×</button>
+                    </span>
+                  ))}
+                </div>
+              )}
+              <span className="form-hint">Bu etiketlere sahip ürünler listeden hariç tutulur (varsayılan: "enriched")</span>
             </div>
           </div>
 
