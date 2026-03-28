@@ -359,6 +359,49 @@ export default function ProductEnrichment({ addToast }: Props) {
         log(`⚠️ ${label} — Meta sync hatası, Shopify kaydı korundu`)
       }
 
+      // Step 5: Google Merchant API sync
+      if (pauseRef.current) return true
+
+      const googleItems = product.variants.map((v) => ({
+        productId: product.numericId,
+        variantId: v.numericId,
+        enrichment: {
+          gender: g.gender || 'female',
+          age_group: g.age_group || 'adult',
+          color: g.color,
+          size: v.options.find((o: any) =>
+            ['boyut', 'beden', 'size'].includes(o.name.toLowerCase())
+          )?.value || g.size || 'Tek Beden',
+          material: g.material,
+          pattern: g.pattern,
+          product_type: g.product_type,
+          custom_label_0: g.custom_label_0,
+          custom_label_1: g.custom_label_1,
+          custom_label_2: g.custom_label_2,
+          custom_label_3: g.custom_label_3,
+          custom_label_4: g.custom_label_4,
+        },
+      }))
+
+      try {
+        log(`🔍 ${label} — Google Merchant sync...`)
+        const gRes = await fetch('/api/sync-google', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ items: googleItems }),
+        })
+        const gData = await gRes.json()
+        if (gData.skipped) {
+          log(`⏭️ ${label} — Google sync atlandı (env var eksik)`)
+        } else if (gData.success) {
+          log(`✅ ${label} — Google Merchant sync başarılı (${gData.successCount}/${gData.total} variant)`)
+        } else {
+          log(`⚠️ ${label} — Google sync: ${gData.successCount || 0}/${gData.total || 0} başarılı${gData.errors?.length ? ` — ${gData.errors[0]?.error}` : ''}`)
+        }
+      } catch {
+        log(`⚠️ ${label} — Google sync hatası, Shopify + Meta kayıtları korundu`)
+      }
+
       return true
     } catch (err: any) {
       log(`❌ ${label} — Hata: ${err.message}`)
