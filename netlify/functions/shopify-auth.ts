@@ -38,15 +38,17 @@ export async function getAccessToken(): Promise<string> {
   }
 
   // Shopify OAuth token endpoint'ine POST at
+  // OAuth 2.0 standardı: application/x-www-form-urlencoded formatı gereklidir
   const url = `https://${DOMAIN}/admin/oauth/access_token`
+  const body = new URLSearchParams({
+    client_id: CLIENT_ID,
+    client_secret: CLIENT_SECRET,
+    grant_type: 'client_credentials',
+  })
   const res = await fetch(url, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      client_id: CLIENT_ID,
-      client_secret: CLIENT_SECRET,
-      grant_type: 'client_credentials',
-    }),
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: body.toString(),
   })
 
   if (!res.ok) {
