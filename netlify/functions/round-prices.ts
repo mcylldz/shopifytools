@@ -40,8 +40,8 @@ export const handler: Handler = async (event) => {
     const token = await getAccessToken()
     const results: { id: string; success: boolean; error?: string }[] = []
 
-    // Shopify rate limit: 40 bucket, 2/sn refill — seri işle
-    const batchSize = 2
+    // Shopify rate limit: 40 bucket, 2/sn refill
+    const batchSize = 4
     for (let i = 0; i < variants.length; i += batchSize) {
       const batch = variants.slice(i, i + batchSize)
 
@@ -77,7 +77,7 @@ export const handler: Handler = async (event) => {
       )
 
       if (i + batchSize < variants.length) {
-        await new Promise((r) => setTimeout(r, 600))
+        await new Promise((r) => setTimeout(r, 300))
       }
     }
 
