@@ -37,7 +37,7 @@ interface MetafieldInput {
   type: string
 }
 
-// BUG 3 FIX: Backend fiyat aralığı hesaplama (Claude'a bırakma)
+// BUG 3 FIX: Backend fiyat aralığı hesaplama
 function getPriceLabel(price: string | number): string {
   const p = typeof price === 'string' ? parseFloat(price) : price
   if (isNaN(p) || p <= 500) return 'Budget'
@@ -46,7 +46,6 @@ function getPriceLabel(price: string | number): string {
   return 'Luxury'
 }
 
-// BUG 3 FIX: Marj hesaplama
 function getMarginLabel(price: string | number, compareAt: string | number | null): string {
   if (!compareAt) return 'Low Margin'
   const p = typeof price === 'string' ? parseFloat(price) : price
@@ -56,6 +55,43 @@ function getMarginLabel(price: string | number, compareAt: string | number | nul
   if (margin > 60) return 'High Margin'
   if (margin >= 40) return 'Standard'
   return 'Low Margin'
+}
+
+// BUG 8 FIX: sale_price_effective_date backend hesaplama
+function calculateSalePriceDate(price: string, compareAtPrice: string | null): string | null {
+  const p = parseFloat(price || '0')
+  const c = parseFloat(compareAtPrice || '0')
+  if (!c || c <= p) return null // İndirim yoksa yazma
+
+  const now = new Date()
+  const end = new Date(now)
+  end.setDate(end.getDate() + 90)
+
+  const fmt = (d: Date) => {
+    const offset = '+03:00'
+    return d.toISOString().replace(/\.\d{3}Z$/, offset)
+  }
+  return `${fmt(now)}/${fmt(end)}`
+}
+
+// BUG 6 FIX: Ürün tipine göre default ağırlık
+function getDefaultWeight(productType: string): { value: string; unit: string } {
+  const t = (productType || '').toLowerCase()
+  if (t.includes('elbise') || t.includes('dress')) return { value: '300', unit: 'g' }
+  if (t.includes('ceket') || t.includes('jacket') || t.includes('mont')) return { value: '500', unit: 'g' }
+  if (t.includes('pantolon') || t.includes('jean')) return { value: '400', unit: 'g' }
+  if (t.includes('aksesuar') || t.includes('takı') || t.includes('kolye') || t.includes('küpe') || t.includes('bileklik')) return { value: '50', unit: 'g' }
+  if (t.includes('çanta') || t.includes('bag')) return { value: '400', unit: 'g' }
+  if (t.includes('atkı') || t.includes('şal')) return { value: '150', unit: 'g' }
+  return { value: '250', unit: 'g' }
+}
+
+// BUG 6 FIX: Shipping weight'ı value/unit'e parse et
+function parseShippingWeight(weight: string): { value: string; unit: string } {
+  if (!weight) return { value: '250', unit: 'g' }
+  const match = weight.match(/^(\d+)\s*(g|kg|lb|oz)$/i)
+  if (match) return { value: match[1], unit: match[2].toLowerCase() }
+  return { value: '250', unit: 'g' }
 }
 
 function buildMetafields(productId: string, enrichment: any, productData?: any): MetafieldInput[] {
@@ -79,20 +115,15 @@ function buildMetafields(productId: string, enrichment: any, productData?: any):
   add('mm-google-shopping', 'age_group', g.age_group)
   add('mm-google-shopping', 'color', g.color)
 
-  // BUG 2 FIX: size alanını yaz
+  // BUG 2 FIX: size alanını variant'tan çıkar
   if (g.size) {
     add('mm-google-shopping', 'size', g.size)
   } else if (productData?.variants?.length > 0) {
-    // Variant'tan size çıkar
     const v = productData.variants[0]
     const sizeOpt = (v.options || v.selectedOptions || []).find(
       (opt: any) => ['boyut', 'beden', 'size'].includes((opt.name || '').toLowerCase())
     )
-    if (sizeOpt?.value) {
-      add('mm-google-shopping', 'size', sizeOpt.value)
-    } else {
-      add('mm-google-shopping', 'size', 'Tek Beden')
-    }
+    add('mm-google-shopping', 'size', sizeOpt?.value || 'Tek Beden')
   }
 
   add('mm-google-shopping', 'material', g.material)
@@ -101,23 +132,29 @@ function buildMetafields(productId: string, enrichment: any, productData?: any):
   add('mm-google-shopping', 'size_type', g.size_type)
   add('mm-google-shopping', 'item_group_id', g.item_group_id)
   add('mm-google-shopping', 'mpn', g.mpn)
-  add('mm-google-shopping', 'shipping_weight', g.shipping_weight)
 
-  // Sale price effective date — sadece indirim varsa
-  const hasDiscount = productData?.variants?.some(
-    (v: any) => v.compareAtPrice && parseFloat(v.compareAtPrice) > parseFloat(v.price)
-  )
-  if (hasDiscount && (g.sale_price_effective_date || m.sale_price_effective_date)) {
-    add('mm-google-shopping', 'sale_price_effective_date', g.sale_price_effective_date || m.sale_price_effective_date)
+  // BUG 6 FIX: Shipping weight — value/unit ayrı + birleşik
+  const weight = g.shipping_weight
+    ? parseShippingWeight(g.shipping_weight)
+    : getDefaultWeight(g.product_type || '')
+  add('mm-google-shopping', 'shipping_weight', `${weight.value} ${weight.unit}`)
+  add('mm-google-shopping', 'shipping_weight_value', weight.value)
+  add('mm-google-shopping', 'shipping_weight_unit', weight.unit)
+
+  // BUG 8 FIX: sale_price_effective_date backend hesaplama
+  const firstVariant = productData?.variants?.[0]
+  const salePriceDate = firstVariant
+    ? calculateSalePriceDate(firstVariant.price, firstVariant.compareAtPrice)
+    : null
+  if (salePriceDate) {
+    add('mm-google-shopping', 'sale_price_effective_date', salePriceDate)
   }
 
   add('mm-google-shopping', 'custom_label_0', g.custom_label_0)
 
-  // BUG 3 FIX: Fiyat aralığını backend'de hesapla, Claude'un çıktısını override et
-  const firstVariant = productData?.variants?.[0]
+  // BUG 3 FIX: Fiyat aralığı backend'de hesapla
   if (firstVariant?.price) {
-    const correctPriceLabel = getPriceLabel(firstVariant.price)
-    add('mm-google-shopping', 'custom_label_1', correctPriceLabel)
+    add('mm-google-shopping', 'custom_label_1', getPriceLabel(firstVariant.price))
   } else {
     add('mm-google-shopping', 'custom_label_1', g.custom_label_1)
   }
@@ -125,10 +162,8 @@ function buildMetafields(productId: string, enrichment: any, productData?: any):
   add('mm-google-shopping', 'custom_label_2', g.custom_label_2)
   add('mm-google-shopping', 'custom_label_3', g.custom_label_3)
 
-  // BUG 3 FIX: Marj hesapla backend'de
   if (firstVariant?.price) {
-    const correctMarginLabel = getMarginLabel(firstVariant.price, firstVariant.compareAtPrice)
-    add('mm-google-shopping', 'custom_label_4', correctMarginLabel)
+    add('mm-google-shopping', 'custom_label_4', getMarginLabel(firstVariant.price, firstVariant.compareAtPrice))
   } else {
     add('mm-google-shopping', 'custom_label_4', g.custom_label_4)
   }
@@ -138,14 +173,13 @@ function buildMetafields(productId: string, enrichment: any, productData?: any):
 
   // — Meta Catalog fields —
   add('mm-meta-catalog', 'short_description', m.short_description)
-  // BUG 4 FIX: Eksik Meta alanlarını ekle
   add('mm-meta-catalog', 'rich_text_description', m.rich_text_description || g.description)
   add('mm-meta-catalog', 'additional_variant_attribute', m.additional_variant_attribute)
   add('mm-meta-catalog', 'fb_product_category', m.fb_product_category)
   add('mm-meta-catalog', 'inventory', m.inventory)
   add('mm-meta-catalog', 'return_policy_days', m.return_policy_days)
 
-  // Mirror custom labels from Google (BUG 3: fiyat/marj da düzeltilmiş)
+  // Mirror custom labels
   const googleLabel1 = firstVariant?.price ? getPriceLabel(firstVariant.price) : (g.custom_label_1 || m.custom_label_1)
   const googleLabel4 = firstVariant?.price ? getMarginLabel(firstVariant.price, firstVariant?.compareAtPrice) : (g.custom_label_4 || m.custom_label_4)
 
@@ -155,21 +189,20 @@ function buildMetafields(productId: string, enrichment: any, productData?: any):
   add('mm-meta-catalog', 'custom_label_3', g.custom_label_3 || m.custom_label_3)
   add('mm-meta-catalog', 'custom_label_4', googleLabel4)
 
-  // BUG 4 FIX: Meta sale_price_effective_date
-  if (hasDiscount && (g.sale_price_effective_date || m.sale_price_effective_date)) {
-    add('mm-meta-catalog', 'sale_price_effective_date', g.sale_price_effective_date || m.sale_price_effective_date)
+  // Meta sale_price_effective_date (same backend calc)
+  if (salePriceDate) {
+    add('mm-meta-catalog', 'sale_price_effective_date', salePriceDate)
   }
 
   // — Enrichment tracking —
   // BUG 5 FIX: Model adı düzeltildi
   add('enrichment', 'status', JSON.stringify({
     last_run: new Date().toISOString(),
-    model: 'claude-sonnet-4',
+    model: 'claude-sonnet-4-6',
     fields_filled: mfs.length,
     errors: 0,
   }), 'json')
   add('enrichment', 'version', '1.0')
-  // BUG 6 FIX: boolean format doğru, value string "true"/"false"
   add('enrichment', 'needs_review', enrichment.needs_review ? 'true' : 'false', 'boolean')
 
   return mfs
@@ -191,7 +224,7 @@ export const handler: Handler = async (event) => {
     enrichment = body.enrichment
     updateTitle = body.updateTitle ?? false
     updateDescription = body.updateDescription ?? false
-    productData = body.productData || null // Frontend'den ürün verisi
+    productData = body.productData || null
     if (!productId || !enrichment) throw new Error('productId ve enrichment gerekli')
   } catch (e: any) {
     return { statusCode: 400, body: JSON.stringify({ error: e.message }) }
@@ -199,53 +232,55 @@ export const handler: Handler = async (event) => {
 
   try {
     const metafields = buildMetafields(productId, enrichment, productData)
-
     console.log(`[save] ${productId}: ${metafields.length} metafield yazılacak`)
 
-    // Max 25 metafield/mutation — gerekirse böl
     let totalWritten = 0
     const errors: string[] = []
 
+    // Metafields — max 25/mutation
     for (let i = 0; i < metafields.length; i += 25) {
       const batch = metafields.slice(i, i + 25)
       const data = await graphqlFetch<any>(METAFIELDS_SET_MUTATION, { metafields: batch })
-
       const userErrors = data.metafieldsSet?.userErrors || []
       if (userErrors.length > 0) {
-        for (const ue of userErrors) {
-          errors.push(`${ue.field}: ${ue.message}`)
-        }
+        for (const ue of userErrors) errors.push(`${ue.field}: ${ue.message}`)
       }
       totalWritten += (data.metafieldsSet?.metafields?.length || 0)
     }
 
-    // BUG 1 FIX: Shopify native productCategory yazma
-    const googleCatId = enrichment.google?.google_product_category
-    if (googleCatId && Number.isInteger(googleCatId) && googleCatId > 0) {
+    // BUG 1 FIX: Shopify native productCategory
+    // Önceki versiyondaki hata: Number.isInteger(string) = false
+    // Şimdi: parseInt ile sayıya çevir
+    const rawCatId = enrichment.google?.google_product_category
+    const catId = typeof rawCatId === 'string' ? parseInt(rawCatId, 10) : rawCatId
+    if (catId && !isNaN(catId) && catId > 0) {
       try {
-        console.log(`[save] ${productId}: productCategory → ${googleCatId}`)
+        console.log(`[save] ${productId}: native productCategory → gid://shopify/ProductTaxonomyNode/${catId}`)
         const catData = await graphqlFetch<any>(PRODUCT_UPDATE_MUTATION, {
           input: {
             id: productId,
             productCategory: {
-              productTaxonomyNodeId: `gid://shopify/ProductTaxonomyNode/${googleCatId}`,
+              productTaxonomyNodeId: `gid://shopify/ProductTaxonomyNode/${catId}`,
             },
           },
         })
         const catErrors = catData.productUpdate?.userErrors || []
         if (catErrors.length > 0) {
           for (const ce of catErrors) {
+            console.error(`[save] productCategory hatası: ${ce.field}: ${ce.message}`)
             errors.push(`productCategory: ${ce.message}`)
           }
         } else {
-          console.log(`[save] ${productId}: productCategory başarıyla güncellendi`)
+          const fullName = catData.productUpdate?.product?.productCategory?.productTaxonomyNode?.fullName
+          console.log(`[save] ${productId}: productCategory başarılı: ${fullName}`)
         }
       } catch (catErr: any) {
-        errors.push(`productCategory hatası: ${catErr.message}`)
+        console.error(`[save] productCategory exception: ${catErr.message}`)
+        errors.push(`productCategory: ${catErr.message}`)
       }
     }
 
-    // Title ve description güncelleme
+    // Title/description güncelleme
     if (updateTitle || updateDescription) {
       const g = enrichment.google || {}
       const updateFields: string[] = []

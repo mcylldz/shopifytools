@@ -311,6 +311,54 @@ export default function ProductEnrichment({ addToast }: Props) {
         log(`✅ ${label} — ${sData.fieldsWritten} alan başarıyla yazıldı`)
       }
 
+      // Step 4: Meta Catalog sync (BUG 0 FIX)
+      if (pauseRef.current) return true // Shopify save başarılı, Meta opsiyonel
+
+      const g = result.google || {}
+      const m = result.meta || {}
+      const metaItems = product.variants.map((v) => ({
+        retailer_id: v.numericId,
+        enrichment: {
+          gender: g.gender || 'female',
+          age_group: g.age_group || 'adult',
+          color: g.color,
+          size: v.options.find((o: any) =>
+            ['boyut', 'beden', 'size'].includes(o.name.toLowerCase())
+          )?.value || g.size || 'Tek Beden',
+          material: g.material,
+          pattern: g.pattern,
+          fb_product_category: m.fb_product_category,
+          short_description: m.short_description,
+          custom_label_0: g.custom_label_0,
+          custom_label_1: g.custom_label_1,
+          custom_label_2: g.custom_label_2,
+          custom_label_3: g.custom_label_3,
+          custom_label_4: g.custom_label_4,
+          shipping_weight_value: g.shipping_weight?.match(/^(\d+)/)?.[1] || '250',
+          shipping_weight_unit: 'g',
+          return_policy_days: m.return_policy_days || '15',
+        },
+      }))
+
+      try {
+        log(`📡 ${label} — Meta Catalog sync...`)
+        const mRes = await fetch('/api/sync-meta-catalog', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ items: metaItems }),
+        })
+        const mData = await mRes.json()
+        if (mData.skipped) {
+          log(`⏭️ ${label} — Meta sync atlandı (env var eksik)`)
+        } else if (mData.success) {
+          log(`✅ ${label} — Meta Catalog sync başarılı`)
+        } else {
+          log(`⚠️ ${label} — Meta sync: ${mData.error || 'bilinmeyen hata'}`)
+        }
+      } catch {
+        log(`⚠️ ${label} — Meta sync hatası, Shopify kaydı korundu`)
+      }
+
       return true
     } catch (err: any) {
       log(`❌ ${label} — Hata: ${err.message}`)

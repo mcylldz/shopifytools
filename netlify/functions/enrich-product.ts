@@ -15,7 +15,13 @@ Dil: Türkçe
 
 KURALLAR:
 
-1. BAŞLIK (title): Max 150 karakter, Türkçe, Format: [Ürün Tipi] + [Öne Çıkan Özellik] + [Renk/Desen] — Svelte Chic
+1. BAŞLIK (title): Max 80 karakter, Türkçe, kısa ve öz.
+   - Format: [Ana Ürün Adı] + [Öne Çıkan 1-2 Özellik] + [Renk]
+   - Sonuna marka adı EKLEME ("— Svelte Chic" yazma! brand alanı zaten ayrıca dolu)
+   - İngilizce terim kullanma: "Cami" → "Askılı", "Top" → "Üst", "Crop" → "Kısa Kesim"
+   - Gereksiz sıfatları çıkar, tekrar etme
+   - Örnek: ✅ "İnci Askılı Uzun Elbise Beyaz Arkası Açık" (42 kar.)
+   - Örnek: ❌ "İnci Anahtar Deliği Yaka Cami Uzun Elbise Beyaz Arkasız Maxi — Svelte Chic" (çok uzun!)
 
 2. AÇIKLAMA (description): Max 5000 karakter, Türkçe, ilk 160 karakterde en önemli bilgi (Google snippet), kumaş/kalıp/özellik/kombinleme önerileri
 
@@ -64,7 +70,7 @@ RESPONSE FORMAT: Her ürün için JSON döndür, hiçbir alanı boş bırakma. A
       "gender": "female",
       "age_group": "adult",
       "color": "Siyah",
-      "size": "M",
+      "size": "S",
       "material": "Polyester",
       "pattern": "Düz",
       "size_system": "TR",
@@ -72,7 +78,6 @@ RESPONSE FORMAT: Her ürün için JSON döndür, hiçbir alanı boş bırakma. A
       "item_group_id": "123",
       "mpn": "SKU_VALUE",
       "shipping_weight": "250 g",
-      "sale_price_effective_date": "2026-03-01T00:00:00+03:00/2026-04-01T00:00:00+03:00",
       "custom_label_0": "Kış 2025",
       "custom_label_1": "Premium",
       "custom_label_2": "Yeni Gelenler",
@@ -87,7 +92,6 @@ RESPONSE FORMAT: Her ürün için JSON döndür, hiçbir alanı boş bırakma. A
       "additional_variant_attribute": "Kumaş: Pamuk, Kalıp: Regular Fit",
       "inventory": "Sınırlı stok",
       "return_policy_days": "15",
-      "sale_price_effective_date": "2026-03-01T00:00:00+03:00/2026-04-01T00:00:00+03:00",
       "custom_label_0": "Kış 2025",
       "custom_label_1": "Premium",
       "custom_label_2": "Yeni Gelenler",
