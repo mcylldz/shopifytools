@@ -148,44 +148,53 @@ export default function PriceRounder({ addToast }: Props) {
     setResultMsg(null)
     setProgress(0)
 
+    const BATCH_SIZE = 20
+    let totalSuccess = 0
+    let totalFail = 0
+
     try {
-      const variants = toUpdate.map((r) => ({
+      const allVariants = toUpdate.map((r) => ({
         id: r.variantId,
         price: r.newPrice,
         compare_at_price: r.newCompare,
       }))
 
-      // Simulate progress
-      const interval = setInterval(() => {
-        setProgress((p) => Math.min(p + 5, 90))
-      }, 400)
+      const totalBatches = Math.ceil(allVariants.length / BATCH_SIZE)
 
-      const res = await fetch('/api/round-prices', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ variants }),
-      })
+      for (let i = 0; i < allVariants.length; i += BATCH_SIZE) {
+        const batch = allVariants.slice(i, i + BATCH_SIZE)
+        const batchNum = Math.floor(i / BATCH_SIZE) + 1
 
-      clearInterval(interval)
-      setProgress(100)
+        const res = await fetch('/api/round-prices', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ variants: batch }),
+        })
 
-      const data = await res.json()
-      if (!res.ok) throw new Error(data.error || 'Bilinmeyen hata')
+        const data = await res.json()
+        if (!res.ok) throw new Error(data.error || 'Bilinmeyen hata')
+
+        totalSuccess += data.successCount || 0
+        totalFail += data.failCount || 0
+
+        // Gerçek ilerleme
+        setProgress(Math.round((batchNum / totalBatches) * 100))
+      }
 
       setResultMsg({
-        type: data.failCount === 0 ? 'success' : 'error',
+        type: totalFail === 0 ? 'success' : 'error',
         text:
-          data.failCount === 0
-            ? `${data.successCount} variant başarıyla güncellendi.`
-            : `${data.successCount} başarılı, ${data.failCount} hata.`,
+          totalFail === 0
+            ? `${totalSuccess} variant başarıyla güncellendi.`
+            : `${totalSuccess} başarılı, ${totalFail} hata.`,
       })
 
       addToast({
-        type: data.failCount === 0 ? 'success' : 'error',
+        type: totalFail === 0 ? 'success' : 'error',
         message:
-          data.failCount === 0
-            ? `✓ ${data.successCount} variant güncellendi!`
-            : `${data.failCount} variant güncellenemedi.`,
+          totalFail === 0
+            ? `✓ ${totalSuccess} variant güncellendi!`
+            : `${totalFail} variant güncellenemedi.`,
       })
 
       // Refresh to show updated prices
