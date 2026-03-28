@@ -76,7 +76,7 @@ export const handler: Handler = async (event) => {
       const e = req.enrichment
       const data: Record<string, string> = {}
 
-      // Sadece dolu alanları gönder
+      // Sadece Meta'nın kabul ettiği alanları gönder
       if (e.gender) data.gender = e.gender
       if (e.age_group) data.age_group = e.age_group
       if (e.color) data.color = e.color
@@ -84,15 +84,17 @@ export const handler: Handler = async (event) => {
       if (e.material) data.material = e.material
       if (e.pattern) data.pattern = e.pattern
       if (e.fb_product_category) data.fb_product_category = e.fb_product_category
-      if (e.short_description) data.short_description = e.short_description
       if (e.custom_label_0) data.custom_label_0 = e.custom_label_0
       if (e.custom_label_1) data.custom_label_1 = e.custom_label_1
       if (e.custom_label_2) data.custom_label_2 = e.custom_label_2
       if (e.custom_label_3) data.custom_label_3 = e.custom_label_3
       if (e.custom_label_4) data.custom_label_4 = e.custom_label_4
-      if (e.shipping_weight_value) data.shipping_weight_value = e.shipping_weight_value
-      if (e.shipping_weight_unit) data.shipping_weight_unit = e.shipping_weight_unit
-      if (e.return_policy_days) data.return_policy_days = e.return_policy_days
+      // shipping_weight: birleşik string "300 g" formatında
+      if (e.shipping_weight_value && e.shipping_weight_unit) {
+        data.shipping_weight = `${e.shipping_weight_value} ${e.shipping_weight_unit}`
+      }
+      // KALDIRILDI: short_description, shipping_weight_value, shipping_weight_unit, return_policy_days
+      // (Meta bu field isimlerini tanımıyor)
 
       return {
         method: 'UPDATE',

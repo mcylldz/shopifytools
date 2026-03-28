@@ -14,10 +14,11 @@ const METAFIELDS_SET_MUTATION = `
   }
 `
 
-// BUG 1 FIX: Native productCategory mutation
-const PRODUCT_UPDATE_MUTATION = `
-  mutation productUpdate($input: ProductInput!) {
-    productUpdate(input: $input) {
+// BUG 1 FIX v3: productChangeCategory — ayrı mutation
+// productCategory, ProductInput içinde DEĞİL, ayrı mutation ile set edilir
+const PRODUCT_CHANGE_CATEGORY_MUTATION = `
+  mutation productChangeCategory($productId: ID!, $taxonomyNodeId: ID!) {
+    productChangeCategory(productId: $productId, taxonomyNodeId: $taxonomyNodeId) {
       product {
         id
         productCategory {
@@ -101,7 +102,11 @@ function buildMetafields(productId: string, enrichment: any, productData?: any):
 
   const add = (ns: string, key: string, value: any, type = 'single_line_text_field') => {
     if (value === null || value === undefined || value === '') return
-    const strValue = typeof value === 'object' ? JSON.stringify(value) : String(value)
+    let strValue = typeof value === 'object' ? JSON.stringify(value) : String(value)
+    // FIX 3: single_line_text_field'a newline girmesini engelle
+    if (type === 'single_line_text_field') {
+      strValue = strValue.replace(/[\r\n]+/g, ' ').trim()
+    }
     mfs.push({ ownerId: productId, namespace: ns, key, value: strValue, type })
   }
 
@@ -171,9 +176,9 @@ function buildMetafields(productId: string, enrichment: any, productData?: any):
   if (g.product_highlight)
     add('mm-google-shopping', 'product_highlight', g.product_highlight, 'json')
 
-  // — Meta Catalog fields —
-  add('mm-meta-catalog', 'short_description', m.short_description)
-  add('mm-meta-catalog', 'rich_text_description', m.rich_text_description || g.description)
+  // — Meta Catalog fields — (multi_line_text_field for descriptions)
+  add('mm-meta-catalog', 'short_description', m.short_description, 'multi_line_text_field')
+  add('mm-meta-catalog', 'rich_text_description', m.rich_text_description || g.description, 'multi_line_text_field')
   add('mm-meta-catalog', 'additional_variant_attribute', m.additional_variant_attribute)
   add('mm-meta-catalog', 'fb_product_category', m.fb_product_category)
   add('mm-meta-catalog', 'inventory', m.inventory)
@@ -344,22 +349,18 @@ export const handler: Handler = async (event) => {
         }
 
         if (taxonomyNodeId) {
-          const catData = await graphqlFetch<any>(PRODUCT_UPDATE_MUTATION, {
-            input: {
-              id: productId,
-              productCategory: {
-                productTaxonomyNodeId: taxonomyNodeId,
-              },
-            },
+          const catData = await graphqlFetch<any>(PRODUCT_CHANGE_CATEGORY_MUTATION, {
+            productId: productId,
+            taxonomyNodeId: taxonomyNodeId,
           })
-          const catErrors = catData.productUpdate?.userErrors || []
+          const catErrors = catData.productChangeCategory?.userErrors || []
           if (catErrors.length > 0) {
             for (const ce of catErrors) {
               console.error(`[save] productCategory hatası: ${ce.field}: ${ce.message}`)
               errors.push(`productCategory: ${ce.message}`)
             }
           } else {
-            const fullName = catData.productUpdate?.product?.productCategory?.productTaxonomyNode?.fullName
+            const fullName = catData.productChangeCategory?.product?.productCategory?.productTaxonomyNode?.fullName
             console.log(`[save] ${productId}: productCategory başarılı: ${fullName}`)
           }
         } else {
