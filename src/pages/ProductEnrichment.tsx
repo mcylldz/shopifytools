@@ -78,6 +78,7 @@ export default function ProductEnrichment({ addToast }: Props) {
   const [mode, setMode] = useState('fill_empty')
   const [visionEnabled, setVisionEnabled] = useState(true)
   const [concurrency, setConcurrency] = useState(DEFAULT_CONCURRENCY)
+  const concurrencyRef = useRef(DEFAULT_CONCURRENCY)
 
   // Processing
   const [isProcessing, setIsProcessing] = useState(false)
@@ -196,6 +197,30 @@ export default function ProductEnrichment({ addToast }: Props) {
   // ─── Missing field count ───
   // Missing field count (placeholder for future use)
 
+  // ─── Fetch with 429 retry ───
+  const fetchWithRetry = async (url: string, options: RequestInit, label: string, maxRetries = 3): Promise<Response> => {
+    for (let attempt = 0; attempt < maxRetries; attempt++) {
+      const res = await fetch(url, options)
+      if (res.status === 429 || res.status === 529) {
+        const waitSec = attempt === 0 ? 30 : 60
+        log(`⏳ ${label} — Rate limit (429), ${waitSec}s bekleniyor... (deneme ${attempt + 1}/${maxRetries})`)
+        // Adaptive concurrency: paralel sayısını düşür
+        const current = concurrencyRef.current
+        if (current > 1) {
+          const newC = Math.max(1, Math.floor(current * 0.6))
+          concurrencyRef.current = newC
+          setConcurrency(newC)
+          log(`⚡ Paralel ${current} → ${newC} düşürüldü (rate limit koruması)`)
+        }
+        await new Promise((r) => setTimeout(r, waitSec * 1000))
+        continue
+      }
+      return res
+    }
+    // Son deneme — hata fırlatılacak
+    return fetch(url, options)
+  }
+
   // ─── Process single product ───
   const processProduct = async (product: ProductData): Promise<boolean> => {
     const label = `"${product.title.slice(0, 30)}..."`
@@ -210,11 +235,11 @@ export default function ProductEnrichment({ addToast }: Props) {
           log(`👁️ ${label} — Vision cache kullanıldı`)
         } else {
           log(`👁️ ${label} — Görsel analiz ediliyor...`)
-          const vRes = await fetch('/api/vision-analyze', {
+          const vRes = await fetchWithRetry('/api/vision-analyze', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ imageUrl: product.featuredImage }),
-          })
+          }, label)
           const vData = await vRes.json()
           if (vData.success && vData.vision) {
             visionData = vData.vision
@@ -232,7 +257,7 @@ export default function ProductEnrichment({ addToast }: Props) {
       // Check pause
       if (pauseRef.current) return false
 
-      // Step 2: Enrich
+      // Step 2: Enrich (with retry)
       log(`🤖 ${label} — Claude ile zenginleştiriliyor...`)
       const enrichBody: any = {
         products: [{
@@ -258,11 +283,11 @@ export default function ProductEnrichment({ addToast }: Props) {
         mode,
       }
 
-      const eRes = await fetch('/api/enrich-product', {
+      const eRes = await fetchWithRetry('/api/enrich-product', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(enrichBody),
-      })
+      }, label)
       const eData = await eRes.json()
       if (!eData.success) throw new Error(eData.error || 'Enrichment başarısız')
 
@@ -429,20 +454,24 @@ export default function ProductEnrichment({ addToast }: Props) {
 
     log(`🚀 ${queue.length} ürün işlenecek (mode: ${mode}, vision: ${visionEnabled ? 'açık' : 'kapalı'}, paralel: ${concurrency})`)
 
-    let consecutiveErrors = 0
+    // Adaptive concurrency ref'i başlat
+    concurrencyRef.current = concurrency
+
     let done = 0
     let success = 0
     let failed = 0
     const errors: EnrichmentProgress['failedQueue'] = []
 
-    // Process in groups of concurrency
-    for (let i = 0; i < queue.length; i += concurrency) {
+    // Process in groups of concurrencyRef (adaptive)
+    let i = 0
+    while (i < queue.length) {
       if (pauseRef.current) {
         log(`⏸️ İşlem duraklatıldı (${done}/${queue.length})`)
         break
       }
 
-      const batch = queue.slice(i, i + concurrency)
+      const currentConcurrency = concurrencyRef.current
+      const batch = queue.slice(i, i + currentConcurrency)
       const results = await Promise.allSettled(
         batch.map(async (product) => {
           const ok = await processProduct(product)
@@ -454,22 +483,13 @@ export default function ProductEnrichment({ addToast }: Props) {
         done++
         if (r.status === 'fulfilled' && r.value.ok) {
           success++
-          consecutiveErrors = 0
         } else {
           failed++
-          consecutiveErrors++
           const p = r.status === 'fulfilled' ? r.value.product : batch[0]
           const errMsg = r.status === 'rejected' ? r.reason?.message : 'İşlem başarısız'
           errors.push({ productId: p.id, title: p.title, error: errMsg, retryCount: 0 })
-
-          // Circuit breaker
-          if (consecutiveErrors >= 5) {
-            log(`🛑 5 ardışık hata! İşlem duraklatıldı. Kontrol edin.`)
-            pauseRef.current = true
-            setIsPaused(true)
-            addToast({ type: 'error', message: '5 ardışık hata — işlem duraklatıldı!' })
-            break
-          }
+          // Hatalı ürünü logla, devam et (circuit breaker YOK)
+          log(`⏭️ ${p.title.slice(0, 30)}... — atlandı, diğer ürünlerle devam ediliyor`)
         }
       }
 
@@ -479,7 +499,7 @@ export default function ProductEnrichment({ addToast }: Props) {
       // Save progress to localStorage
       const progressData: EnrichmentProgress = {
         cursor: null,
-        processedIds: queue.slice(0, i + concurrency).map((p) => p.id),
+        processedIds: queue.slice(0, i + currentConcurrency).map((p) => p.id),
         successCount: success,
         failedCount: failed,
         failedQueue: errors,
@@ -487,6 +507,8 @@ export default function ProductEnrichment({ addToast }: Props) {
         settings: { platforms, mode, visionEnabled },
       }
       localStorage.setItem(STORAGE_KEY, JSON.stringify(progressData))
+
+      i += currentConcurrency
     }
 
     if (!pauseRef.current) {
