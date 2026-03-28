@@ -52,7 +52,7 @@ interface Props {
 }
 
 // ─── Constants ──────────────────────────────────────────────────────
-const CONCURRENCY = 3
+const DEFAULT_CONCURRENCY = 5
 const COST_PER_PRODUCT = 0.013  // Vision açık tahmini
 const COST_PER_PRODUCT_NO_VISION = 0.01
 const STORAGE_KEY = 'enrichment_progress'
@@ -77,6 +77,7 @@ export default function ProductEnrichment({ addToast }: Props) {
   const [platforms, setPlatforms] = useState({ google: true, meta: true })
   const [mode, setMode] = useState('fill_empty')
   const [visionEnabled, setVisionEnabled] = useState(true)
+  const [concurrency, setConcurrency] = useState(DEFAULT_CONCURRENCY)
 
   // Processing
   const [isProcessing, setIsProcessing] = useState(false)
@@ -188,9 +189,9 @@ export default function ProductEnrichment({ addToast }: Props) {
     const count = selectedProducts.length
     const costPerUnit = visionEnabled ? COST_PER_PRODUCT : COST_PER_PRODUCT_NO_VISION
     const cost = count * costPerUnit
-    const timeMin = Math.ceil((count / CONCURRENCY) * (visionEnabled ? 12 : 8) / 60)
+    const timeMin = Math.ceil((count / concurrency) * (visionEnabled ? 12 : 8) / 60)
     return { count, cost: cost.toFixed(2), timeMin }
-  }, [selectedProducts.length, visionEnabled])
+  }, [selectedProducts.length, visionEnabled, concurrency])
 
   // ─── Missing field count ───
   // Missing field count (placeholder for future use)
@@ -426,7 +427,7 @@ export default function ProductEnrichment({ addToast }: Props) {
     setDryRunResults([])
     setTotalUsage({ input_tokens: 0, output_tokens: 0 })
 
-    log(`🚀 ${queue.length} ürün işlenecek (mode: ${mode}, vision: ${visionEnabled ? 'açık' : 'kapalı'})`)
+    log(`🚀 ${queue.length} ürün işlenecek (mode: ${mode}, vision: ${visionEnabled ? 'açık' : 'kapalı'}, paralel: ${concurrency})`)
 
     let consecutiveErrors = 0
     let done = 0
@@ -434,14 +435,14 @@ export default function ProductEnrichment({ addToast }: Props) {
     let failed = 0
     const errors: EnrichmentProgress['failedQueue'] = []
 
-    // Process in groups of CONCURRENCY
-    for (let i = 0; i < queue.length; i += CONCURRENCY) {
+    // Process in groups of concurrency
+    for (let i = 0; i < queue.length; i += concurrency) {
       if (pauseRef.current) {
         log(`⏸️ İşlem duraklatıldı (${done}/${queue.length})`)
         break
       }
 
-      const batch = queue.slice(i, i + CONCURRENCY)
+      const batch = queue.slice(i, i + concurrency)
       const results = await Promise.allSettled(
         batch.map(async (product) => {
           const ok = await processProduct(product)
@@ -478,7 +479,7 @@ export default function ProductEnrichment({ addToast }: Props) {
       // Save progress to localStorage
       const progressData: EnrichmentProgress = {
         cursor: null,
-        processedIds: queue.slice(0, i + CONCURRENCY).map((p) => p.id),
+        processedIds: queue.slice(0, i + concurrency).map((p) => p.id),
         successCount: success,
         failedCount: failed,
         failedQueue: errors,
@@ -778,6 +779,27 @@ export default function ProductEnrichment({ addToast }: Props) {
                   <div style={{ padding: '8px 12px', background: 'var(--bg-card)', borderRadius: 8, color: 'var(--text-muted)', fontSize: 13 }}>
                     Claude Sonnet 4.6 (sabit)
                   </div>
+                </div>
+              </div>
+
+              <div className="form-row" style={{ marginBottom: 16 }}>
+                <div className="form-group">
+                  <label className="form-label">⚡ Paralel İşlem (Concurrency): <strong>{concurrency}</strong></label>
+                  <input
+                    type="range"
+                    min={1}
+                    max={10}
+                    value={concurrency}
+                    onChange={(e) => setConcurrency(Number(e.target.value))}
+                    style={{ width: '100%', accentColor: 'var(--primary)' }}
+                    disabled={isProcessing}
+                  />
+                  <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11, color: 'var(--text-muted)' }}>
+                    <span>1 (güvenli)</span>
+                    <span>5 (önerilen)</span>
+                    <span>10 (hızlı)</span>
+                  </div>
+                  <span className="form-hint">Yüksek değerler hızı artırır ama API rate limitine takılma riski artar</span>
                 </div>
               </div>
 
