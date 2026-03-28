@@ -81,3 +81,45 @@ export async function getAccessToken(): Promise<string> {
 }
 
 export const SHOPIFY_DOMAIN = DOMAIN
+export const SHOPIFY_GRAPHQL_URL = DOMAIN
+  ? `https://${DOMAIN}/admin/api/2025-01/graphql.json`
+  : ''
+
+/** Helper: GraphQL fetch with auto token + rate limit retry */
+export async function graphqlFetch<T = any>(
+  query: string,
+  variables: Record<string, unknown> = {},
+  maxRetries = 3
+): Promise<T> {
+  const token = await getAccessToken()
+
+  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    const res = await fetch(SHOPIFY_GRAPHQL_URL, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Shopify-Access-Token': token,
+      },
+      body: JSON.stringify({ query, variables }),
+    })
+
+    if (res.status === 429) {
+      const retryAfter = parseFloat(res.headers.get('Retry-After') || '2')
+      console.log(`[graphql] Rate limited, retry in ${retryAfter}s (attempt ${attempt + 1})`)
+      await new Promise((r) => setTimeout(r, retryAfter * 1000))
+      continue
+    }
+
+    if (!res.ok) {
+      const text = await res.text()
+      throw new Error(`Shopify GraphQL hatası (${res.status}): ${text.slice(0, 300)}`)
+    }
+
+    const json = await res.json()
+    if (json.errors?.length) {
+      throw new Error(`GraphQL hata: ${json.errors.map((e: any) => e.message).join('; ')}`)
+    }
+    return json.data as T
+  }
+  throw new Error('Shopify GraphQL: max rate limit retry aşıldı')
+}

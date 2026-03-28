@@ -1,11 +1,13 @@
 import { useState } from 'react'
 import PriceRounder from './pages/PriceRounder'
+import ProductEnrichment from './pages/ProductEnrichment'
 import Toast, { ToastData } from './components/Toast'
 
-type Page = 'price-rounder'
+type Page = 'price-rounder' | 'product-enrichment'
 
 const navItems: { id: Page; icon: string; label: string }[] = [
   { id: 'price-rounder', icon: '₺', label: 'Fiyat Yuvarlama' },
+  { id: 'product-enrichment', icon: '🧠', label: 'AI Enrichment' },
 ]
 
 export default function App() {
@@ -52,6 +54,7 @@ export default function App() {
       {/* Main */}
       <main className="main-content">
         {activePage === 'price-rounder' && <PriceRounder addToast={addToast} />}
+        {activePage === 'product-enrichment' && <ProductEnrichment addToast={addToast} />}
       </main>
 
       <Toast toasts={toasts} />
