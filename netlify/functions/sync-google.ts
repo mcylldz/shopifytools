@@ -62,14 +62,13 @@ async function updateProduct(
   if (e.pattern) body.pattern = e.pattern
   if (e.product_type) body.productTypes = [e.product_type]
 
-  // Custom labels
-  const customAttrs: { name: string; value: string }[] = []
-  if (e.custom_label_0) customAttrs.push({ name: 'custom_label_0', value: e.custom_label_0 })
-  if (e.custom_label_1) customAttrs.push({ name: 'custom_label_1', value: e.custom_label_1 })
-  if (e.custom_label_2) customAttrs.push({ name: 'custom_label_2', value: e.custom_label_2 })
-  if (e.custom_label_3) customAttrs.push({ name: 'custom_label_3', value: e.custom_label_3 })
-  if (e.custom_label_4) customAttrs.push({ name: 'custom_label_4', value: e.custom_label_4 })
-  if (customAttrs.length > 0) body.customAttributes = customAttrs
+  // Custom labels — Google Content API UPDATE'de customAttributes kabul etmiyor
+  // custom_label_0-4 doğrudan standart alanlar olarak gönder
+  if (e.custom_label_0) body.customLabel0 = e.custom_label_0
+  if (e.custom_label_1) body.customLabel1 = e.custom_label_1
+  if (e.custom_label_2) body.customLabel2 = e.custom_label_2
+  if (e.custom_label_3) body.customLabel3 = e.custom_label_3
+  if (e.custom_label_4) body.customLabel4 = e.custom_label_4
 
   try {
     const res = await fetch(url, {
