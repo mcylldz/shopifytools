@@ -14,15 +14,14 @@ const METAFIELDS_SET_MUTATION = `
   }
 `
 
-// BUG 1 FIX v4: productUpdate with nested productCategory
+// BUG 1 FIX v5: Shopify 2025-01'de field adı 'category' (scalar ID)
+// productCategory değil, category olarak gönderilmeli
 const PRODUCT_CATEGORY_MUTATION = `
   mutation productUpdate($input: ProductInput!) {
     productUpdate(input: $input) {
       product {
         id
-        productCategory {
-          productTaxonomyNode { id fullName }
-        }
+        category { id name fullName }
       }
       userErrors { field message }
     }
@@ -348,23 +347,22 @@ export const handler: Handler = async (event) => {
         }
 
         if (taxonomyNodeId) {
+          console.log(`[save] ${productId}: category = ${taxonomyNodeId}`)
           const catData = await graphqlFetch<any>(PRODUCT_CATEGORY_MUTATION, {
             input: {
               id: productId,
-              productCategory: {
-                productTaxonomyNodeId: taxonomyNodeId,
-              },
+              category: taxonomyNodeId,
             },
           })
           const catErrors = catData.productUpdate?.userErrors || []
           if (catErrors.length > 0) {
             for (const ce of catErrors) {
-              console.error(`[save] productCategory hatası: ${ce.field}: ${ce.message}`)
-              errors.push(`productCategory: ${ce.message}`)
+              console.error(`[save] category hatası: ${ce.field}: ${ce.message}`)
+              errors.push(`category: ${ce.message}`)
             }
           } else {
-            const fullName = catData.productUpdate?.product?.productCategory?.productTaxonomyNode?.fullName
-            console.log(`[save] ${productId}: productCategory başarılı: ${fullName}`)
+            const cat = catData.productUpdate?.product?.category
+            console.log(`[save] ${productId}: category başarılı: ${cat?.fullName || cat?.name}`)
           }
         } else {
           console.log(`[save] ${productId}: taxonomy node bulunamadı — productCategory atlandı`)
