@@ -7,9 +7,9 @@ interface VariantUpdate {
   compare_at_price: string | null
 }
 
-const roundUp = (value: string | null): string | null => {
+const roundToHundred = (value: string | null): string | null => {
   if (!value || parseFloat(value) === 0) return value
-  return String(Math.ceil(parseFloat(value)))
+  return String(Math.round(parseFloat(value) / 100) * 100)
 }
 
 export const handler: Handler = async (event) => {
@@ -58,8 +58,8 @@ export const handler: Handler = async (event) => {
               body: JSON.stringify({
                 variant: {
                   id: variant.id,
-                  price: roundUp(variant.price),
-                  compare_at_price: roundUp(variant.compare_at_price),
+                  price: roundToHundred(variant.price),
+                  compare_at_price: roundToHundred(variant.compare_at_price),
                 },
               }),
             })

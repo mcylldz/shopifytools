@@ -38,22 +38,24 @@ const fmt = (v: string | null) => {
   return '₺' + parseFloat(v).toLocaleString('tr-TR', { minimumFractionDigits: 2 })
 }
 
+const roundTo100 = (n: number) => Math.round(n / 100) * 100
+
 const fmtNew = (v: string | null) => {
   if (!v || parseFloat(v) === 0) return null
-  return '₺' + Math.ceil(parseFloat(v)).toLocaleString('tr-TR', { minimumFractionDigits: 2 })
+  return '₺' + roundTo100(parseFloat(v)).toLocaleString('tr-TR', { minimumFractionDigits: 2 })
 }
 
-const roundUp = (v: string | null): string | null => {
+const roundToHundred = (v: string | null): string | null => {
   if (!v || parseFloat(v) === 0) return v
-  return String(Math.ceil(parseFloat(v)))
+  return String(roundTo100(parseFloat(v)))
 }
 
 const isChanged = (v: Variant) => {
-  const priceChanged = parseFloat(v.price) !== Math.ceil(parseFloat(v.price))
+  const priceChanged = parseFloat(v.price) !== roundTo100(parseFloat(v.price))
   const compareChanged =
     v.compare_at_price != null &&
     parseFloat(v.compare_at_price) > 0 &&
-    parseFloat(v.compare_at_price) !== Math.ceil(parseFloat(v.compare_at_price))
+    parseFloat(v.compare_at_price) !== roundTo100(parseFloat(v.compare_at_price))
   return priceChanged || compareChanged
 }
 
@@ -80,9 +82,9 @@ export default function PriceRounder({ addToast }: Props) {
           variantId: v.id,
           variantTitle: v.title,
           oldPrice: v.price,
-          newPrice: roundUp(v.price) || v.price,
+          newPrice: roundToHundred(v.price) || v.price,
           oldCompare: v.compare_at_price,
-          newCompare: roundUp(v.compare_at_price),
+          newCompare: roundToHundred(v.compare_at_price),
           changed,
         })
       }
@@ -184,7 +186,7 @@ export default function PriceRounder({ addToast }: Props) {
       <div className="page-header">
         <h1 className="page-title">Fiyat Yuvarlama</h1>
         <p className="page-desc">
-          Ürün fiyatlarını ve karşılaştırma fiyatlarını tam sayıya yukarı yuvarlar (₺2.374 → ₺2.400)
+          Ürün fiyatlarını ve karşılaştırma fiyatlarını en yakın 100'e yuvarlar (₺4.431 → ₺4.400)
         </p>
       </div>
 
@@ -298,7 +300,7 @@ export default function PriceRounder({ addToast }: Props) {
             {displayRows.length === 0 ? (
               <div className="empty-state">
                 <div className="empty-state-icon">🎉</div>
-                <div className="empty-state-text">Tüm fiyatlar zaten tam sayı — yuvarlanacak bir şey yok.</div>
+                <div className="empty-state-text">Tüm fiyatlar zaten 100'ün katı — yuvarlanacak bir şey yok.</div>
               </div>
             ) : (
               <div className="table-wrapper">
@@ -325,14 +327,14 @@ export default function PriceRounder({ addToast }: Props) {
 
                         {/* Price */}
                         <td>
-                          {r.changed && parseFloat(r.oldPrice) !== Math.ceil(parseFloat(r.oldPrice)) ? (
+                          {r.changed && parseFloat(r.oldPrice) !== roundTo100(parseFloat(r.oldPrice)) ? (
                             <span className="price-old">{fmt(r.oldPrice)}</span>
                           ) : (
                             <span className="price-same">{fmt(r.oldPrice)}</span>
                           )}
                         </td>
                         <td>
-                          {r.changed && parseFloat(r.oldPrice) !== Math.ceil(parseFloat(r.oldPrice)) ? (
+                          {r.changed && parseFloat(r.oldPrice) !== roundTo100(parseFloat(r.oldPrice)) ? (
                             <span className="price-new">{fmtNew(r.oldPrice)}</span>
                           ) : (
                             <span className="price-same">{fmt(r.oldPrice)}</span>
@@ -343,7 +345,7 @@ export default function PriceRounder({ addToast }: Props) {
                         <td>
                           {r.oldCompare && parseFloat(r.oldCompare) > 0 ? (
                             r.changed &&
-                            parseFloat(r.oldCompare) !== Math.ceil(parseFloat(r.oldCompare)) ? (
+                            parseFloat(r.oldCompare) !== roundTo100(parseFloat(r.oldCompare)) ? (
                               <span className="price-old">{fmt(r.oldCompare)}</span>
                             ) : (
                               <span className="price-same">{fmt(r.oldCompare)}</span>
@@ -355,7 +357,7 @@ export default function PriceRounder({ addToast }: Props) {
                         <td>
                           {r.oldCompare && parseFloat(r.oldCompare) > 0 ? (
                             r.changed &&
-                            parseFloat(r.oldCompare) !== Math.ceil(parseFloat(r.oldCompare)) ? (
+                            parseFloat(r.oldCompare) !== roundTo100(parseFloat(r.oldCompare)) ? (
                               <span className="price-new">{fmtNew(r.oldCompare)}</span>
                             ) : (
                               <span className="price-same">{fmt(r.oldCompare)}</span>
