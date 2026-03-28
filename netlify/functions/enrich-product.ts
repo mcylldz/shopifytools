@@ -133,7 +133,7 @@ ${JSON.stringify(products, null, 2)}
     console.log(`[enrich] ${products.length} ürün işleniyor, mode=${mode}`)
 
     const response = await anthropic.messages.create({
-      model: 'claude-sonnet-4-6-20250514',
+      model: 'claude-sonnet-4-20250514',
       max_tokens: 4096,
       temperature: 0.3,
       system: SYSTEM_PROMPT,

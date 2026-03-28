@@ -76,7 +76,7 @@ function buildMetafields(productId: string, enrichment: any): MetafieldInput[] {
   // — Enrichment tracking —
   add('enrichment', 'status', JSON.stringify({
     last_run: new Date().toISOString(),
-    model: 'claude-sonnet-4-6',
+    model: 'claude-sonnet-4',
     fields_filled: mfs.length,
     errors: 0,
   }), 'json')
