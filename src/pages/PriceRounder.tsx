@@ -101,18 +101,35 @@ export default function PriceRounder({ addToast }: Props) {
     setResultMsg(null)
     setProgress(0)
     try {
-      const qs = new URLSearchParams()
-      if (tag.trim()) qs.set('tag', tag.trim())
-      if (status !== 'any') qs.set('status', status)
-      qs.set('limit', '250')
+      const baseQs = new URLSearchParams()
+      if (tag.trim()) baseQs.set('tag', tag.trim())
+      if (status !== 'any') baseQs.set('status', status)
 
-      const res = await fetch(`/api/get-products?${qs.toString()}`)
-      const data = await res.json()
-      if (!res.ok) throw new Error(data.error || 'Bilinmeyen hata')
-      setProducts(data.products || [])
+      let allProducts: Product[] = []
+      let pageInfo: string | null = null
+      let pageNum = 0
 
-      const count = (data.products || []).length
-      addToast({ type: 'info', message: `${count} ürün yüklendi.` })
+      // Sayfa sayfa çek — Netlify timeout'u önler
+      do {
+        pageNum++
+        const qs = new URLSearchParams(baseQs)
+        if (pageInfo) qs.set('page_info', pageInfo)
+
+        const res = await fetch(`/api/get-products?${qs.toString()}`)
+        const data = await res.json()
+        if (!res.ok) throw new Error(data.error || 'Bilinmeyen hata')
+
+        allProducts = allProducts.concat(data.products || [])
+        pageInfo = data.nextPageInfo || null
+
+        // İlerleme göster
+        setProgress(data.hasMore ? Math.min(pageNum * 15, 90) : 100)
+      } while (pageInfo)
+
+      setProducts(allProducts)
+      setProgress(0)
+
+      addToast({ type: 'info', message: `${allProducts.length} ürün yüklendi.` })
     } catch (err: any) {
       addToast({ type: 'error', message: err.message })
     } finally {
