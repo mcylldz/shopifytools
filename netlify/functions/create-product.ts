@@ -10,24 +10,25 @@ interface CreateProductInput {
   variants: {
     title?: string
     size?: string
+    color?: string
     price: string
     compareAtPrice?: string
   }[]
   vendor?: string
   productType?: string
-  metafields?: any[]
 }
 
-const PRODUCT_CREATE_MUTATION = `
-  mutation productCreate($input: ProductInput!, $media: [CreateMediaInput!]!) {
-    productCreate(input: $input, media: $media) {
+// Adım 1: Ürün oluştur (variant + option yok)
+const PRODUCT_CREATE = `
+  mutation productCreate($product: ProductCreateInput!, $media: [CreateMediaInput!]) {
+    productCreate(product: $product, media: $media) {
       product {
         id
         title
         handle
         status
-        variants(first: 50) {
-          nodes { id title }
+        variants(first: 1) {
+          nodes { id title price }
         }
       }
       userErrors { field message }
@@ -35,20 +36,35 @@ const PRODUCT_CREATE_MUTATION = `
   }
 `
 
-// Görselsiz ürün oluşturma (media ayrı)
-const PRODUCT_CREATE_SIMPLE = `
-  mutation productCreate($input: ProductInput!) {
-    productCreate(input: $input) {
-      product {
+// Adım 2: Variant set (options + variants birlikte)
+const PRODUCT_VARIANT_BULK = `
+  mutation productVariantsBulkCreate($productId: ID!, $variants: [ProductVariantsBulkInput!]!, $strategy: ProductVariantsBulkCreateStrategy) {
+    productVariantsBulkCreate(productId: $productId, variants: $variants, strategy: $strategy) {
+      productVariants {
         id
         title
-        handle
-        status
-        onlineStoreUrl
-        variants(first: 50) {
-          nodes { id title price }
-        }
+        price
       }
+      userErrors { field message }
+    }
+  }
+`
+
+// Option ekleme
+const PRODUCT_OPTIONS_UPDATE = `
+  mutation productUpdate($input: ProductInput!) {
+    productUpdate(input: $input) {
+      product { id }
+      userErrors { field message }
+    }
+  }
+`
+
+// Varsayılan variant silme
+const VARIANT_DELETE = `
+  mutation productVariantDelete($id: ID!) {
+    productVariantDelete(id: $id) {
+      deletedProductVariantId
       userErrors { field message }
     }
   }
@@ -61,107 +77,135 @@ export const handler: Handler = async (event) => {
 
   try {
     const body: CreateProductInput = JSON.parse(event.body || '{}')
-
     if (!body.title) {
       return { statusCode: 400, body: JSON.stringify({ error: 'title gerekli' }) }
     }
 
-    // Variant options oluştur
     const hasSizes = body.variants?.some((v) => v.size)
 
-    // Product input
-    const input: any = {
+    // ── Adım 1: Ürün oluştur ──
+    const product: any = {
       title: body.title,
       descriptionHtml: body.descriptionHtml || '',
       handle: body.handle || undefined,
       tags: body.tags || [],
-      status: 'DRAFT', // Varsayılan taslak
+      status: 'DRAFT',
     }
 
-    if (body.vendor) input.vendor = body.vendor
-    if (body.productType) input.productType = body.productType
+    if (body.vendor) product.vendor = body.vendor
+    if (body.productType) product.productType = body.productType
 
-    // Variant'lar
-    if (body.variants && body.variants.length > 0 && hasSizes) {
-      input.options = ['Beden']
-      input.variants = body.variants.map((v) => ({
-        optionValues: [{ optionName: 'Beden', name: v.size || v.title }],
-        price: v.price,
-        compareAtPrice: v.compareAtPrice || undefined,
-      }))
-    } else if (body.variants && body.variants.length > 0) {
-      // Tek variant, bedensiz
-      input.variants = [{
-        price: body.variants[0].price,
-        compareAtPrice: body.variants[0].compareAtPrice || undefined,
-      }]
-    }
-
-    // Görselleri media olarak ekle
-    if (body.images && body.images.length > 0) {
-      const media = body.images.map((url, i) => ({
+    // Media
+    const media = (body.images || [])
+      .filter((u) => u.startsWith('http'))
+      .map((url, i) => ({
         originalSource: url,
         alt: `${body.title} - ${i + 1}`,
         mediaContentType: 'IMAGE',
       }))
 
-      const data = await graphqlFetch<any>(PRODUCT_CREATE_MUTATION, { input, media })
-      const userErrors = data.productCreate?.userErrors || []
+    console.log(`[create-product] Creating: ${body.title}, images: ${media.length}, variants: ${body.variants?.length}`)
 
-      if (userErrors.length > 0) {
-        console.error(`[create-product] Errors:`, JSON.stringify(userErrors))
-        return {
-          statusCode: 200,
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ success: false, errors: userErrors }),
-        }
-      }
+    const createData = await graphqlFetch<any>(PRODUCT_CREATE, {
+      product,
+      media: media.length > 0 ? media : undefined,
+    })
 
-      const product = data.productCreate?.product
-      console.log(`[create-product] Ürün oluşturuldu: ${product?.id} — ${product?.title}`)
-
+    const createErrors = createData.productCreate?.userErrors || []
+    if (createErrors.length > 0) {
+      console.error(`[create-product] Create errors:`, JSON.stringify(createErrors))
       return {
         statusCode: 200,
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          success: true,
-          product: {
-            id: product?.id,
-            title: product?.title,
-            handle: product?.handle,
-            status: product?.status,
-            variants: product?.variants?.nodes || [],
-          },
-        }),
+        body: JSON.stringify({ success: false, errors: createErrors }),
       }
-    } else {
-      // Görselsiz
-      const data = await graphqlFetch<any>(PRODUCT_CREATE_SIMPLE, { input })
-      const userErrors = data.productCreate?.userErrors || []
+    }
 
-      if (userErrors.length > 0) {
-        return {
-          statusCode: 200,
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ success: false, errors: userErrors }),
+    const createdProduct = createData.productCreate?.product
+    if (!createdProduct?.id) throw new Error('Ürün oluşturulamadı')
+
+    console.log(`[create-product] Created: ${createdProduct.id}`)
+
+    // Default variant'ın ID'si (sonra silinecek)
+    const defaultVariantId = createdProduct.variants?.nodes?.[0]?.id
+
+    // ── Adım 2: Variant'ları ekle ──
+    if (hasSizes && body.variants && body.variants.length > 0) {
+      // Önce variant'ları ekle
+      const variantInputs = body.variants.map((v) => ({
+        price: v.price,
+        compareAtPrice: v.compareAtPrice || undefined,
+        optionValues: [
+          { optionName: 'Beden', name: v.size || v.title || 'Tek Beden' },
+        ],
+      }))
+
+      console.log(`[create-product] Adding ${variantInputs.length} variants...`)
+
+      const variantData = await graphqlFetch<any>(PRODUCT_VARIANT_BULK, {
+        productId: createdProduct.id,
+        variants: variantInputs,
+        strategy: 'REMOVE_STANDALONE_VARIANT',
+      })
+
+      const variantErrors = variantData.productVariantsBulkCreate?.userErrors || []
+      if (variantErrors.length > 0) {
+        console.error(`[create-product] Variant errors:`, JSON.stringify(variantErrors))
+      }
+
+      const createdVariants = variantData.productVariantsBulkCreate?.productVariants || []
+      console.log(`[create-product] ${createdVariants.length} variants created`)
+    } else if (body.variants?.length === 1) {
+      // Tek variant — fiyat güncelle
+      if (defaultVariantId) {
+        try {
+          await graphqlFetch<any>(`
+            mutation variantUpdate($input: ProductVariantInput!) {
+              productVariantUpdate(input: $input) {
+                productVariant { id price }
+                userErrors { field message }
+              }
+            }
+          `, {
+            input: {
+              id: defaultVariantId,
+              price: body.variants[0].price,
+              compareAtPrice: body.variants[0].compareAtPrice || undefined,
+            },
+          })
+        } catch (e: any) {
+          console.error(`[create-product] Variant update error: ${e.message}`)
         }
       }
+    }
 
-      const product = data.productCreate?.product
-      return {
-        statusCode: 200,
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          success: true,
-          product: {
-            id: product?.id,
-            title: product?.title,
-            handle: product?.handle,
-            status: product?.status,
-            variants: product?.variants?.nodes || [],
-          },
-        }),
+    // Son ürün bilgilerini çek
+    const finalData = await graphqlFetch<any>(`
+      query getProduct($id: ID!) {
+        product(id: $id) {
+          id title handle status
+          variants(first: 50) {
+            nodes { id title price }
+          }
+        }
       }
+    `, { id: createdProduct.id })
+
+    const finalProduct = finalData.product
+
+    return {
+      statusCode: 200,
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        success: true,
+        product: {
+          id: finalProduct?.id || createdProduct.id,
+          title: finalProduct?.title || createdProduct.title,
+          handle: finalProduct?.handle || createdProduct.handle,
+          status: finalProduct?.status || 'DRAFT',
+          variants: finalProduct?.variants?.nodes || [],
+        },
+      }),
     }
   } catch (err: any) {
     console.error(`[create-product] Fatal: ${err.message}`)

@@ -39,8 +39,8 @@ const STEPS = [
   { id: 3, icon: '🎨', label: 'Varyantlar' },
   { id: 4, icon: '💰', label: 'Fiyat' },
   { id: 5, icon: '🏷️', label: 'Etiketler' },
-  { id: 6, icon: '🔗', label: 'Handle' },
-  { id: 7, icon: '🤖', label: 'AI Enrichment' },
+  { id: 6, icon: '🤖', label: 'AI Enrichment' },
+  { id: 7, icon: '🔗', label: 'Handle' },
   { id: 8, icon: '✅', label: 'Son Kontrol' },
 ]
 
@@ -160,7 +160,7 @@ export default function ProductImport({ addToast }: Props) {
       baseTRY = p.price.amount * 45
     }
     // 1688 priceTRY zaten (CNY×7+1400) olarak gelir
-    const selling = roundTo100(baseTRY * 3)
+    const selling = roundTo100(baseTRY * 2)
     setSellingPrice(selling)
 
     const discounts = [0.4, 0.5, 0.6]
@@ -669,8 +669,8 @@ export default function ProductImport({ addToast }: Props) {
               </div>
               <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 4 }}>
                 {product.source === '1688'
-                  ? `Formül: (${product.price.amount} × 7 + 1400) × 3 → en yakın 100`
-                  : `Formül: ${product.price.amount} × 45 × 3 → en yakın 100`}
+                  ? `Formül: (${product.price.amount} × 7 + 1400) × 2 → en yakın 100`
+                  : `Formül: ${product.price.amount} × 45 × 2 → en yakın 100`}
               </div>
             </div>
 
@@ -724,33 +724,13 @@ export default function ProductImport({ addToast }: Props) {
             )}
             <div style={{ display: 'flex', gap: 8 }}>
               <button className="btn" onClick={prev}>← Geri</button>
-              <button className="btn btn-primary" onClick={next}>Devam → Handle</button>
-            </div>
-          </div>
-        )}
-
-        {/* ═══ STEP 6: Handle ═══ */}
-        {step === 6 && (
-          <div className="card">
-            <div className="card-title">🔗 URL Handle</div>
-            <div className="form-group" style={{ marginBottom: 16 }}>
-              <label className="form-label">Ürün Handle (URL slug)</label>
-              <input className="form-input" value={handle} onChange={(e) => setHandle(e.target.value)} />
-              <span className="form-hint">URL: sveltechic.com/products/{handle}</span>
-            </div>
-            <button className="btn btn-sm" style={{ marginBottom: 16 }}
-              onClick={() => setHandle(slugify(enrichedTitle || product?.title || ''))}>
-              🔄 Otomatik Oluştur
-            </button>
-            <div style={{ display: 'flex', gap: 8 }}>
-              <button className="btn" onClick={prev}>← Geri</button>
               <button className="btn btn-primary" onClick={next}>Devam → AI Enrichment</button>
             </div>
           </div>
         )}
 
-        {/* ═══ STEP 7: AI Enrichment ═══ */}
-        {step === 7 && product && (
+        {/* ═══ STEP 6: AI Enrichment ═══ */}
+        {step === 6 && product && (
           <div className="card">
             <div className="card-title">🤖 AI Enrichment</div>
 
@@ -797,10 +777,30 @@ export default function ProductImport({ addToast }: Props) {
 
                 <div style={{ display: 'flex', gap: 8 }}>
                   <button className="btn" onClick={prev}>← Geri</button>
-                  <button className="btn btn-primary" onClick={next}>Devam → Son Kontrol</button>
+                  <button className="btn btn-primary" onClick={next}>Devam → Handle</button>
                 </div>
               </div>
             )}
+          </div>
+        )}
+
+        {/* ═══ STEP 7: Handle ═══ */}
+        {step === 7 && (
+          <div className="card">
+            <div className="card-title">🔗 URL Handle</div>
+            <div className="form-group" style={{ marginBottom: 16 }}>
+              <label className="form-label">Ürün Handle (URL slug)</label>
+              <input className="form-input" value={handle} onChange={(e) => setHandle(e.target.value)} />
+              <span className="form-hint">URL: sveltechic.com/products/{handle}</span>
+            </div>
+            <button className="btn btn-sm" style={{ marginBottom: 16 }}
+              onClick={() => setHandle(slugify(enrichedTitle || product?.title || ''))}>
+              🔄 Otomatik Oluştur
+            </button>
+            <div style={{ display: 'flex', gap: 8 }}>
+              <button className="btn" onClick={prev}>← Geri</button>
+              <button className="btn btn-primary" onClick={next}>Devam → Son Kontrol</button>
+            </div>
           </div>
         )}
 
