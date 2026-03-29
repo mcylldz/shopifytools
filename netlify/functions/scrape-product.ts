@@ -116,18 +116,19 @@ function parse1688Html(html: string): ScrapedProduct {
     || html.match(/price.*?([\d]+\.[\d]+)/)
   if (priceMatch) priceCNY = parseFloat(priceMatch[1])
 
-  // Bedenler
+  // Bedenler — sadece harf bedenleri
   const sizes: string[] = []
-  const sizeRegex = /(?:XS|S|M|L|XL|XXL|XXXL|2XL|3XL|4XL|5XL|\d{2,3})/g
-  const sizeSection = html.match(/(?:尺码|size|beden|规格)[^<]*<[^>]*>([^]*?)<\/(?:div|ul|table)/i)
-  if (sizeSection) {
-    const sizeMatches = sizeSection[1].match(sizeRegex) || []
-    for (const s of sizeMatches) {
-      if (!sizes.includes(s)) sizes.push(s)
-    }
+  const sizeRegex = /\b(XXXS|XXS|XS|S|M|L|XL|XXL|XXXL|2XL|3XL|4XL|5XL)\b/g
+  // Tüm HTML'de ara
+  const allSizeMatches = html.match(sizeRegex) || []
+  for (const s of allSizeMatches) {
+    const upper = s.toUpperCase()
+    if (!sizes.includes(upper)) sizes.push(upper)
   }
+  // Sıralama
+  const sizeOrder = ['XXXS', 'XXS', 'XS', 'S', 'M', 'L', 'XL', 'XXL', 'XXXL', '2XL', '3XL', '4XL', '5XL']
+  sizes.sort((a, b) => sizeOrder.indexOf(a) - sizeOrder.indexOf(b))
   if (sizes.length === 0) {
-    // Fallback: default sizes
     sizes.push('S', 'M', 'L', 'XL')
   }
 
@@ -136,7 +137,8 @@ function parse1688Html(html: string): ScrapedProduct {
   const descMatch = html.match(/"description"\s*:\s*"([^"]+)"/)
   if (descMatch) description = descMatch[1]
 
-  const priceTRY = Math.round(priceCNY * CNY_TO_TRY)
+  // CNY fiyat: (CNY × 7 + 1400) formülü — 3x çarpma frontend'de
+  const priceTRY = Math.round(priceCNY * CNY_TO_TRY + 1400)
 
   const variants = sizes.map((s) => ({
     title: s,

@@ -27,14 +27,21 @@ interface ImageItem {
   order: number
 }
 
+interface VariantItem {
+  name: string
+  sizes: string[]
+  imageIndex: number | null // hangi görsel bu varyanta ait
+}
+
 const STEPS = [
-  { id: 1, icon: '🔗', label: 'URL & Scrape' },
-  { id: 2, icon: '🤖', label: 'AI Enrichment' },
-  { id: 3, icon: '🖼️', label: 'Görseller' },
-  { id: 4, icon: '💰', label: 'Fiyatlandırma' },
+  { id: 1, icon: '🔗', label: 'Scrape' },
+  { id: 2, icon: '🖼️', label: 'Görseller' },
+  { id: 3, icon: '🎨', label: 'Varyantlar' },
+  { id: 4, icon: '💰', label: 'Fiyat' },
   { id: 5, icon: '🏷️', label: 'Etiketler' },
   { id: 6, icon: '🔗', label: 'Handle' },
-  { id: 7, icon: '✅', label: 'Son Kontrol' },
+  { id: 7, icon: '🤖', label: 'AI Enrichment' },
+  { id: 8, icon: '✅', label: 'Son Kontrol' },
 ]
 
 function roundTo100(n: number): number {
@@ -56,39 +63,50 @@ function slugify(text: string): string {
 export default function ProductImport({ addToast }: Props) {
   const [step, setStep] = useState(1)
 
-  // Step 1
+  // Step 1 — Scrape
   const [url, setUrl] = useState('')
   const [html1688, setHtml1688] = useState('')
   const [scraping, setScraping] = useState(false)
   const [product, setProduct] = useState<ScrapedProduct | null>(null)
   const [needs1688Html, setNeeds1688Html] = useState(false)
 
-  // Step 2
-  const [enrichment, setEnrichment] = useState<any>(null)
-  const [enriching, setEnriching] = useState(false)
-  const [enrichedTitle, setEnrichedTitle] = useState('')
-  const [enrichedDesc, setEnrichedDesc] = useState('')
-
-  // Step 3
+  // Step 2 — Images
   const [images, setImages] = useState<ImageItem[]>([])
   const fileRef = useRef<HTMLInputElement>(null)
 
-  // Step 4
+  // Step 3 — Variants
+  const [useVariants, setUseVariants] = useState(false)
+  const [variants, setVariants] = useState<VariantItem[]>([])
+  const [sizes, setSizes] = useState<string[]>([])
+  const [sizeInput, setSizeInput] = useState('')
+
+  // Step 4 — Pricing
   const [sellingPrice, setSellingPrice] = useState(0)
   const [comparePrice, setComparePrice] = useState(0)
   const [discountPct, setDiscountPct] = useState(0)
 
-  // Step 5
+  // Step 5 — Tags
   const [tags, setTags] = useState('')
 
-  // Step 6
+  // Step 6 — Handle
   const [handle, setHandle] = useState('')
 
-  // Step 7
+  // Step 7 — Enrichment
+  const [enrichment, setEnrichment] = useState<any>(null)
+  const [enriching, setEnriching] = useState(false)
+  const [enrichedTitle, setEnrichedTitle] = useState('')
+  const [enrichedDesc, setEnrichedDesc] = useState('')
+  const [visionImageIdx, setVisionImageIdx] = useState(0)
+
+  // Step 8 — Push
   const [pushing, setPushing] = useState(false)
   const [pushResult, setPushResult] = useState<any>(null)
+  const [syncingMeta, setSyncingMeta] = useState(false)
+  const [syncingGoogle, setSyncingGoogle] = useState(false)
+  const [metaSynced, setMetaSynced] = useState(false)
+  const [googleSynced, setGoogleSynced] = useState(false)
 
-  // ─── Step 1: Scrape ───
+  // ────────────────── Step 1: Scrape ──────────────────
   const handleScrape = async () => {
     if (!url && !html1688) return
     setScraping(true)
@@ -115,18 +133,20 @@ export default function ProductImport({ addToast }: Props) {
 
       if (!data.success) throw new Error(data.error)
 
-      setProduct(data.product)
-      // Görselleri hazırla
-      setImages(data.product.images.map((url: string, i: number) => ({
-        url, selected: true, order: i,
-      })))
-      // Fiyat hesapla
-      calculatePrice(data.product)
-      // Handle oluştur
-      setHandle(slugify(data.product.title))
-      // Tags
-      setTags(data.product.tags || '')
-      addToast({ type: 'success', message: `${data.product.source === 'shopify' ? 'Shopify' : '1688'} ürünü çekildi!` })
+      const p: ScrapedProduct = data.product
+      setProduct(p)
+      setImages(p.images.map((url: string, i: number) => ({ url, selected: true, order: i })))
+      setSizes([...p.sizes])
+      calculatePrice(p)
+      setHandle(slugify(p.title))
+      setTags(p.tags || '')
+      setEnrichedTitle(p.title)
+      setEnrichedDesc('')
+
+      // Default tek varyant
+      setVariants([{ name: p.colors?.[0] || 'Varsayılan', sizes: [...p.sizes], imageIndex: 0 }])
+
+      addToast({ type: 'success', message: `${p.source === 'shopify' ? 'Shopify' : '1688'} ürünü çekildi!` })
     } catch (err: any) {
       addToast({ type: 'error', message: err.message })
     } finally {
@@ -137,84 +157,22 @@ export default function ProductImport({ addToast }: Props) {
   const calculatePrice = (p: ScrapedProduct) => {
     let baseTRY = p.priceTRY
     if (p.source === 'shopify') {
-      // USD: amount × 45 × 3 → en yakın 100
       baseTRY = p.price.amount * 45
     }
+    // 1688 priceTRY zaten (CNY×7+1400) olarak gelir
     const selling = roundTo100(baseTRY * 3)
     setSellingPrice(selling)
 
-    // Random indirim: %40, %50, %60
     const discounts = [0.4, 0.5, 0.6]
     const disc = discounts[Math.floor(Math.random() * discounts.length)]
     setDiscountPct(Math.round(disc * 100))
-    // compareAt = selling / (1 - disc) → yani selling, compareAt'ın disc% indirimi
     const compare = roundTo100(selling / (1 - disc))
     setComparePrice(compare)
   }
 
-  // ─── Step 2: Enrichment ───
-  const handleEnrich = async () => {
-    if (!product) return
-    setEnriching(true)
-
-    try {
-      // Vision
-      let visionData: any = null
-      if (product.images[0]) {
-        const vRes = await fetch('/api/vision-analyze', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ imageUrl: product.images[0] }),
-        })
-        const vData = await vRes.json()
-        if (vData.success) visionData = vData.vision
-      }
-
-      // Enrich
-      const eRes = await fetch('/api/enrich-product', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          products: [{
-            product_id: 'import_new',
-            title: product.title,
-            body_html: product.description,
-            tags: product.tags || '',
-            vendor: product.vendor || '',
-            product_type: product.productType || '',
-            images: product.images.slice(0, 3),
-            variants: product.variants.map((v) => ({
-              id: 'new',
-              title: v.title,
-              sku: v.sku || '',
-              price: String(sellingPrice),
-              option1: v.size || v.title,
-            })),
-            ...(visionData && { vision_analysis: visionData }),
-          }],
-          mode: 'overwrite',
-        }),
-      })
-      const eData = await eRes.json()
-      if (!eData.success) throw new Error(eData.error)
-
-      const result = eData.results?.[0]
-      setEnrichment(result)
-      setEnrichedTitle(result?.google?.title || product.title)
-      setEnrichedDesc(result?.google?.description || product.description)
-      addToast({ type: 'success', message: 'AI enrichment tamamlandı!' })
-    } catch (err: any) {
-      addToast({ type: 'error', message: err.message })
-    } finally {
-      setEnriching(false)
-    }
-  }
-
-  // ─── Step 3: Image helpers ───
+  // ────────────────── Step 2: Image helpers ──────────────────
   const toggleImage = (idx: number) => {
-    setImages((prev) => prev.map((img, i) =>
-      i === idx ? { ...img, selected: !img.selected } : img
-    ))
+    setImages((prev) => prev.map((img, i) => i === idx ? { ...img, selected: !img.selected } : img))
   }
 
   const moveImage = (idx: number, dir: -1 | 1) => {
@@ -228,8 +186,8 @@ export default function ProductImport({ addToast }: Props) {
   }
 
   const addImageUrl = () => {
-    const url = prompt('Görsel URL girin:')
-    if (url) setImages((prev) => [...prev, { url, selected: true, order: prev.length }])
+    const u = prompt('Görsel URL girin:')
+    if (u) setImages((prev) => [...prev, { url: u, selected: true, order: prev.length }])
   }
 
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -238,14 +196,96 @@ export default function ProductImport({ addToast }: Props) {
     for (const file of Array.from(files)) {
       const reader = new FileReader()
       reader.onload = () => {
-        const dataUrl = reader.result as string
-        setImages((prev) => [...prev, { url: dataUrl, selected: true, order: prev.length }])
+        setImages((prev) => [...prev, { url: reader.result as string, selected: true, order: prev.length }])
       }
       reader.readAsDataURL(file)
     }
   }
 
-  // ─── Step 7: Push to Shopify ───
+  // ────────────────── Step 3: Variant helpers ──────────────────
+  const addVariant = () => {
+    const name = prompt('Varyant adı (ör: Siyah, Beyaz):')
+    if (name) setVariants((prev) => [...prev, { name, sizes: [...sizes], imageIndex: null }])
+  }
+
+  const removeVariant = (idx: number) => {
+    setVariants((prev) => prev.filter((_, i) => i !== idx))
+  }
+
+  const setVariantImage = (vIdx: number, imgIdx: number) => {
+    setVariants((prev) => prev.map((v, i) => i === vIdx ? { ...v, imageIndex: imgIdx } : v))
+  }
+
+  const addSize = () => {
+    const s = sizeInput.trim().toUpperCase()
+    if (s && !sizes.includes(s)) {
+      setSizes((prev) => [...prev, s])
+      setVariants((prev) => prev.map((v) => ({ ...v, sizes: [...v.sizes, s] })))
+    }
+    setSizeInput('')
+  }
+
+  const removeSize = (size: string) => {
+    setSizes((prev) => prev.filter((s) => s !== size))
+    setVariants((prev) => prev.map((v) => ({ ...v, sizes: v.sizes.filter((s) => s !== size) })))
+  }
+
+  // ────────────────── Step 7: Enrichment ──────────────────
+  const handleEnrich = async () => {
+    if (!product) return
+    setEnriching(true)
+
+    try {
+      const selectedImgs = images.filter((i) => i.selected).sort((a, b) => a.order - b.order)
+      const visionUrl = selectedImgs[visionImageIdx]?.url || selectedImgs[0]?.url
+
+      let visionData: any = null
+      if (visionUrl && visionUrl.startsWith('http')) {
+        const vRes = await fetch('/api/vision-analyze', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ imageUrl: visionUrl }),
+        })
+        const vData = await vRes.json()
+        if (vData.success) visionData = vData.vision
+      }
+
+      const eRes = await fetch('/api/enrich-product', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          products: [{
+            product_id: 'import_new',
+            title: enrichedTitle || product.title,
+            body_html: product.description,
+            tags: tags,
+            vendor: product.vendor || '',
+            product_type: product.productType || '',
+            images: selectedImgs.slice(0, 3).map((i) => i.url),
+            variants: sizes.map((s) => ({
+              id: 'new', title: s, sku: '', price: String(sellingPrice), option1: s,
+            })),
+            ...(visionData && { vision_analysis: visionData }),
+          }],
+          mode: 'overwrite',
+        }),
+      })
+      const eData = await eRes.json()
+      if (!eData.success) throw new Error(eData.error)
+
+      const result = eData.results?.[0]
+      setEnrichment(result)
+      if (result?.google?.title) setEnrichedTitle(result.google.title)
+      if (result?.google?.description) setEnrichedDesc(result.google.description)
+      addToast({ type: 'success', message: 'AI enrichment tamamlandı!' })
+    } catch (err: any) {
+      addToast({ type: 'error', message: err.message })
+    } finally {
+      setEnriching(false)
+    }
+  }
+
+  // ────────────────── Step 8: Push ──────────────────
   const handlePush = async () => {
     if (!product) return
     setPushing(true)
@@ -253,6 +293,20 @@ export default function ProductImport({ addToast }: Props) {
 
     try {
       const selectedImages = images.filter((i) => i.selected).sort((a, b) => a.order - b.order)
+
+      const finalVariants = useVariants && variants.length > 1
+        ? variants.flatMap((v) => v.sizes.map((s) => ({
+            title: `${v.name} / ${s}`,
+            size: s,
+            color: v.name,
+            price: String(sellingPrice),
+            compareAtPrice: String(comparePrice),
+          })))
+        : sizes.map((s) => ({
+            size: s,
+            price: String(sellingPrice),
+            compareAtPrice: String(comparePrice),
+          }))
 
       const res = await fetch('/api/create-product', {
         method: 'POST',
@@ -263,14 +317,8 @@ export default function ProductImport({ addToast }: Props) {
           handle,
           tags: tags.split(',').map((t) => t.trim()).filter(Boolean),
           images: selectedImages.map((i) => i.url).filter((u) => u.startsWith('http')),
-          variants: product.sizes.length > 0
-            ? product.sizes.map((s) => ({
-                size: s,
-                price: String(sellingPrice),
-                compareAtPrice: String(comparePrice),
-              }))
-            : [{ price: String(sellingPrice), compareAtPrice: String(comparePrice) }],
-          vendor: product.vendor || 'Svelte Chic',
+          variants: finalVariants.length > 0 ? finalVariants : [{ price: String(sellingPrice), compareAtPrice: String(comparePrice) }],
+          vendor: product.vendor || '',
           productType: product.productType || '',
         }),
       })
@@ -282,6 +330,24 @@ export default function ProductImport({ addToast }: Props) {
       }
 
       setPushResult(data.product)
+
+      // Metafield'ları kaydet
+      if (enrichment) {
+        try {
+          await fetch('/api/save-metafields', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              productId: data.product.id,
+              enrichment,
+              updateTitle: false,
+              updateDescription: false,
+              addFinishTag: false,
+            }),
+          })
+        } catch { /* metafield kaydetme opsiyonel */ }
+      }
+
       addToast({ type: 'success', message: `✅ Ürün oluşturuldu: ${data.product.title}` })
     } catch (err: any) {
       addToast({ type: 'error', message: err.message })
@@ -290,11 +356,104 @@ export default function ProductImport({ addToast }: Props) {
     }
   }
 
+  // ────────────────── Post-push: Sync ──────────────────
+  const handleSyncMeta = async () => {
+    if (!pushResult || !enrichment) return
+    setSyncingMeta(true)
+
+    try {
+      const g = enrichment.google || {}
+      const m = enrichment.meta || {}
+      const metaItems = (pushResult.variants || [{ id: 'default' }]).map((v: any) => ({
+        retailer_id: v.id?.replace(/\D/g, '') || pushResult.id?.replace(/\D/g, ''),
+        enrichment: {
+          gender: g.gender || 'female',
+          age_group: g.age_group || 'adult',
+          color: g.color,
+          size: 'Tek Beden',
+          material: g.material,
+          pattern: g.pattern,
+          fb_product_category: m.fb_product_category,
+          short_description: m.short_description,
+          custom_label_0: g.custom_label_0,
+          custom_label_1: g.custom_label_1,
+          custom_label_2: g.custom_label_2,
+          custom_label_3: g.custom_label_3,
+          custom_label_4: g.custom_label_4,
+        },
+      }))
+
+      const res = await fetch('/api/sync-meta-catalog', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ items: metaItems }),
+      })
+      const data = await res.json()
+      if (data.success) {
+        setMetaSynced(true)
+        addToast({ type: 'success', message: 'Meta Catalog sync başarılı!' })
+      } else {
+        addToast({ type: 'error', message: `Meta sync: ${data.error || 'hata'}` })
+      }
+    } catch (err: any) {
+      addToast({ type: 'error', message: err.message })
+    } finally {
+      setSyncingMeta(false)
+    }
+  }
+
+  const handleSyncGoogle = async () => {
+    if (!pushResult || !enrichment) return
+    setSyncingGoogle(true)
+
+    try {
+      const g = enrichment.google || {}
+      const productNumericId = pushResult.id?.replace(/\D/g, '')
+      const googleItems = (pushResult.variants || [{ id: pushResult.id }]).map((v: any) => ({
+        productId: productNumericId,
+        variantId: v.id?.replace(/\D/g, '') || productNumericId,
+        enrichment: {
+          gender: g.gender || 'female',
+          age_group: g.age_group || 'adult',
+          color: g.color,
+          size: 'Tek Beden',
+          material: g.material,
+          pattern: g.pattern,
+          product_type: g.product_type,
+          custom_label_0: g.custom_label_0,
+          custom_label_1: g.custom_label_1,
+          custom_label_2: g.custom_label_2,
+          custom_label_3: g.custom_label_3,
+          custom_label_4: g.custom_label_4,
+        },
+      }))
+
+      const res = await fetch('/api/sync-google', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ items: googleItems }),
+      })
+      const data = await res.json()
+      if (data.success) {
+        setGoogleSynced(true)
+        addToast({ type: 'success', message: 'Google Merchant sync başarılı!' })
+      } else {
+        addToast({ type: 'error', message: `Google sync: ${data.error || 'hata'}` })
+      }
+    } catch (err: any) {
+      addToast({ type: 'error', message: err.message })
+    } finally {
+      setSyncingGoogle(false)
+    }
+  }
+
   const goTo = (s: number) => setStep(s)
-  const next = () => setStep((s) => Math.min(s + 1, 7))
+  const next = () => setStep((s) => Math.min(s + 1, 8))
   const prev = () => setStep((s) => Math.max(s - 1, 1))
 
-  // ─── Render ───
+  const selectedImages = images.filter((i) => i.selected).sort((a, b) => a.order - b.order)
+
+  // ═══════════════════ RENDER ═══════════════════
   return (
     <>
       <div className="page-header">
@@ -304,23 +463,17 @@ export default function ProductImport({ addToast }: Props) {
 
       <div className="page-body">
         {/* Stepper */}
-        <div style={{ display: 'flex', gap: 4, marginBottom: 24, overflowX: 'auto' }}>
+        <div style={{ display: 'flex', gap: 3, marginBottom: 24, overflowX: 'auto' }}>
           {STEPS.map((s) => (
             <button
               key={s.id}
               onClick={() => product && goTo(s.id)}
               style={{
-                flex: 1,
-                padding: '10px 8px',
-                border: 'none',
-                borderRadius: 8,
+                flex: 1, padding: '8px 4px', border: 'none', borderRadius: 6,
                 background: step === s.id ? 'var(--primary)' : s.id < step ? 'var(--success)' : 'var(--bg-card)',
                 color: step === s.id || s.id < step ? '#fff' : 'var(--text-muted)',
-                fontSize: 12,
-                fontWeight: step === s.id ? 700 : 400,
-                cursor: product ? 'pointer' : 'default',
-                transition: 'all .2s',
-                whiteSpace: 'nowrap',
+                fontSize: 11, fontWeight: step === s.id ? 700 : 400,
+                cursor: product ? 'pointer' : 'default', transition: 'all .2s', whiteSpace: 'nowrap',
               }}
             >
               {s.icon} {s.label}
@@ -328,7 +481,7 @@ export default function ProductImport({ addToast }: Props) {
           ))}
         </div>
 
-        {/* ─── Step 1: URL & Scrape ─── */}
+        {/* ═══ STEP 1: URL & Scrape ═══ */}
         {step === 1 && (
           <div className="card">
             <div className="card-title">🔗 Ürün Bağlantısı</div>
@@ -336,13 +489,8 @@ export default function ProductImport({ addToast }: Props) {
             <div className="form-group" style={{ marginBottom: 16 }}>
               <label className="form-label">Ürün URL'si</label>
               <div style={{ display: 'flex', gap: 8 }}>
-                <input
-                  className="form-input"
-                  placeholder="https://store.com/products/... veya https://detail.1688.com/..."
-                  value={url}
-                  onChange={(e) => setUrl(e.target.value)}
-                  style={{ flex: 1 }}
-                />
+                <input className="form-input" placeholder="https://store.com/products/... veya https://detail.1688.com/..."
+                  value={url} onChange={(e) => setUrl(e.target.value)} style={{ flex: 1 }} />
                 <button className="btn btn-primary" onClick={handleScrape} disabled={scraping || (!url && !html1688)}>
                   {scraping ? <><span className="spinner" /> Çekiliyor...</> : '🔍 Çek'}
                 </button>
@@ -351,15 +499,10 @@ export default function ProductImport({ addToast }: Props) {
 
             {needs1688Html && (
               <div className="form-group" style={{ marginBottom: 16 }}>
-                <label className="form-label">1688 Sayfa HTML'i (sağ tık → Sayfa kaynağını görüntüle)</label>
-                <textarea
-                  className="form-input"
-                  rows={6}
-                  placeholder="HTML kaynağını buraya yapıştırın..."
-                  value={html1688}
-                  onChange={(e) => setHtml1688(e.target.value)}
-                  style={{ fontFamily: 'monospace', fontSize: 11 }}
-                />
+                <label className="form-label">1688 Sayfa HTML'i</label>
+                <textarea className="form-input" rows={6} placeholder="HTML kaynağını yapıştırın..."
+                  value={html1688} onChange={(e) => setHtml1688(e.target.value)}
+                  style={{ fontFamily: 'monospace', fontSize: 11 }} />
                 <button className="btn btn-primary" onClick={handleScrape} disabled={scraping || !html1688}
                   style={{ marginTop: 8 }}>
                   {scraping ? <><span className="spinner" /> Parse ediliyor...</> : '📋 Parse Et'}
@@ -373,109 +516,43 @@ export default function ProductImport({ addToast }: Props) {
                   {product.images[0] && (
                     <img src={product.images[0]} alt="" style={{ width: 120, height: 160, objectFit: 'cover', borderRadius: 8 }} />
                   )}
-                  <div>
+                  <div style={{ fontSize: 13 }}>
                     <h3 style={{ margin: '0 0 8px', fontSize: 16 }}>{product.title}</h3>
-                    <p style={{ fontSize: 13, color: 'var(--text-muted)', margin: '0 0 4px' }}>
-                      Kaynak: <strong>{product.source === 'shopify' ? 'Shopify' : '1688'}</strong>
-                    </p>
-                    <p style={{ fontSize: 13, margin: '0 0 4px' }}>
-                      Fiyat: <strong>
-                        {product.price.amount} {product.price.currency}
-                        {product.price.currency !== 'TRY' && ` → ₺${product.priceTRY}`}
-                      </strong>
-                    </p>
-                    <p style={{ fontSize: 13, margin: '0 0 4px' }}>
-                      Bedenler: <strong>{product.sizes.join(', ') || 'Tek beden'}</strong>
-                    </p>
-                    <p style={{ fontSize: 13, margin: 0 }}>
-                      Görseller: <strong>{product.images.length}</strong>
-                    </p>
+                    <p style={{ margin: '0 0 4px' }}>Kaynak: <strong>{product.source === 'shopify' ? 'Shopify' : '1688'}</strong></p>
+                    <p style={{ margin: '0 0 4px' }}>Fiyat: <strong>{product.price.amount} {product.price.currency} → ₺{product.priceTRY}</strong></p>
+                    <p style={{ margin: '0 0 4px' }}>Bedenler: <strong>{product.sizes.join(', ') || 'Yok'}</strong></p>
+                    <p style={{ margin: 0 }}>Görseller: <strong>{product.images.length}</strong></p>
                   </div>
                 </div>
-
-                <button className="btn btn-primary" style={{ marginTop: 16 }} onClick={next}>
-                  Devam → AI Enrichment
-                </button>
+                <button className="btn btn-primary" style={{ marginTop: 16 }} onClick={next}>Devam → Görseller</button>
               </div>
             )}
           </div>
         )}
 
-        {/* ─── Step 2: Enrichment ─── */}
+        {/* ═══ STEP 2: Images ═══ */}
         {step === 2 && product && (
           <div className="card">
-            <div className="card-title">🤖 AI Enrichment</div>
-
-            {!enrichment ? (
-              <div>
-                <p style={{ fontSize: 13, color: 'var(--text-muted)', marginBottom: 16 }}>
-                  Claude AI ile ürün detayları oluşturulacak (başlık, açıklama, meta veriler).
-                </p>
-                <button className="btn btn-primary" onClick={handleEnrich} disabled={enriching}>
-                  {enriching ? <><span className="spinner" /> Enrichment yapılıyor...</> : '🧠 Enrichment Başlat'}
-                </button>
-              </div>
-            ) : (
-              <div>
-                <div className="form-group" style={{ marginBottom: 16 }}>
-                  <label className="form-label">Önerilen Başlık</label>
-                  <input className="form-input" value={enrichedTitle}
-                    onChange={(e) => setEnrichedTitle(e.target.value)} />
-                </div>
-                <div className="form-group" style={{ marginBottom: 16 }}>
-                  <label className="form-label">Önerilen Açıklama</label>
-                  <textarea className="form-input" rows={6} value={enrichedDesc}
-                    onChange={(e) => setEnrichedDesc(e.target.value)} />
-                </div>
-
-                {enrichment.google && (
-                  <div style={{ background: 'var(--bg-card)', borderRadius: 8, padding: 12, marginBottom: 16 }}>
-                    <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 8 }}>Google Shopping Verileri</div>
-                    <div style={{ fontSize: 12, display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 4 }}>
-                      {Object.entries(enrichment.google).slice(0, 12).map(([k, v]) => (
-                        <div key={k}><span style={{ color: 'var(--text-muted)' }}>{k}:</span> {String(v).slice(0, 50)}</div>
-                      ))}
-                    </div>
-                  </div>
-                )}
-
-                <div style={{ display: 'flex', gap: 8 }}>
-                  <button className="btn" onClick={prev}>← Geri</button>
-                  <button className="btn btn-primary" onClick={next}>Devam → Görseller</button>
-                </div>
-              </div>
-            )}
-          </div>
-        )}
-
-        {/* ─── Step 3: Görseller ─── */}
-        {step === 3 && product && (
-          <div className="card">
             <div className="card-title">🖼️ Görsel Yönetimi</div>
-            <p style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 16 }}>
-              Görselleri sıralayın, istemediğinizi kaldırın, yeni ekleyin. Seçili görseller Shopify'a gönderilir.
-            </p>
 
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(140px, 1fr))', gap: 12, marginBottom: 16 }}>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(130px, 1fr))', gap: 10, marginBottom: 16 }}>
               {images.map((img, idx) => (
                 <div key={idx} style={{
                   border: img.selected ? '2px solid var(--primary)' : '2px solid var(--border)',
-                  borderRadius: 8, overflow: 'hidden', opacity: img.selected ? 1 : 0.4,
+                  borderRadius: 8, overflow: 'hidden', opacity: img.selected ? 1 : 0.3,
                   position: 'relative', transition: 'all .2s',
                 }}>
-                  <img src={img.url} alt="" style={{ width: '100%', height: 180, objectFit: 'cover' }} />
-                  <div style={{ padding: 6, display: 'flex', gap: 4, justifyContent: 'center', flexWrap: 'wrap' }}>
-                    <button className="btn btn-sm" onClick={() => moveImage(idx, -1)} title="Yukarı">↑</button>
-                    <button className="btn btn-sm" onClick={() => moveImage(idx, 1)} title="Aşağı">↓</button>
+                  <img src={img.url} alt="" style={{ width: '100%', height: 160, objectFit: 'cover' }} />
+                  <div style={{ padding: 4, display: 'flex', gap: 3, justifyContent: 'center', flexWrap: 'wrap' }}>
+                    <button className="btn btn-sm" onClick={() => moveImage(idx, -1)}>↑</button>
+                    <button className="btn btn-sm" onClick={() => moveImage(idx, 1)}>↓</button>
                     <button className="btn btn-sm" onClick={() => toggleImage(idx)}
                       style={{ background: img.selected ? 'var(--danger)' : 'var(--success)', color: '#fff' }}>
                       {img.selected ? '✕' : '✓'}
                     </button>
-                    <a href={img.url} target="_blank" rel="noreferrer" className="btn btn-sm" title="İndir">⬇</a>
+                    <a href={img.url} target="_blank" rel="noreferrer" className="btn btn-sm">⬇</a>
                   </div>
-                  <div style={{ textAlign: 'center', fontSize: 10, padding: '0 4px 4px', color: 'var(--text-muted)', wordBreak: 'break-all' }}>
-                    #{idx + 1}
-                  </div>
+                  <div style={{ textAlign: 'center', fontSize: 10, padding: '0 4px 4px', color: 'var(--text-muted)' }}>#{idx + 1}</div>
                 </div>
               ))}
             </div>
@@ -486,14 +563,13 @@ export default function ProductImport({ addToast }: Props) {
               <input ref={fileRef} type="file" accept="image/*" multiple hidden onChange={handleFileUpload} />
             </div>
 
-            {/* Download URLs */}
             <details style={{ marginBottom: 16 }}>
               <summary style={{ cursor: 'pointer', fontSize: 12, color: 'var(--text-muted)' }}>📋 Görsel URL'leri</summary>
               <div style={{ background: 'var(--bg-card)', borderRadius: 8, padding: 8, marginTop: 8, fontSize: 11, fontFamily: 'monospace' }}>
-                {images.filter((i) => i.selected).map((img, i) => (
+                {selectedImages.map((img, i) => (
                   <div key={i} style={{ marginBottom: 4 }}>
                     <a href={img.url} target="_blank" rel="noreferrer" style={{ color: 'var(--primary)', wordBreak: 'break-all' }}>
-                      {img.url.slice(0, 100)}...
+                      {img.url.slice(0, 100)}{img.url.length > 100 ? '...' : ''}
                     </a>
                   </div>
                 ))}
@@ -502,26 +578,99 @@ export default function ProductImport({ addToast }: Props) {
 
             <div style={{ display: 'flex', gap: 8 }}>
               <button className="btn" onClick={prev}>← Geri</button>
+              <button className="btn btn-primary" onClick={next}>Devam → Varyantlar</button>
+            </div>
+          </div>
+        )}
+
+        {/* ═══ STEP 3: Variants ═══ */}
+        {step === 3 && product && (
+          <div className="card">
+            <div className="card-title">🎨 Varyantlar</div>
+
+            {/* Bedenler — düzenlenebilir */}
+            <div className="form-group" style={{ marginBottom: 16 }}>
+              <label className="form-label">Bedenler</label>
+              <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 8 }}>
+                {sizes.map((s) => (
+                  <span key={s} className="tag-chip">
+                    {s} <button onClick={() => removeSize(s)}>×</button>
+                  </span>
+                ))}
+              </div>
+              <div style={{ display: 'flex', gap: 8 }}>
+                <input className="form-input" placeholder="Beden ekle (ör: XS)" value={sizeInput}
+                  onChange={(e) => setSizeInput(e.target.value)}
+                  onKeyDown={(e) => e.key === 'Enter' && (e.preventDefault(), addSize())}
+                  style={{ width: 120 }} />
+                <button className="btn btn-sm" onClick={addSize}>Ekle</button>
+              </div>
+            </div>
+
+            {/* Varyant kullanımı */}
+            <div className="form-group" style={{ marginBottom: 16 }}>
+              <label className="checkbox-row">
+                <input type="checkbox" checked={useVariants} onChange={(e) => setUseVariants(e.target.checked)} />
+                Renk / model varyantları kullan (1688'den birden fazla varyant)
+              </label>
+            </div>
+
+            {useVariants && (
+              <>
+                {variants.map((v, vIdx) => (
+                  <div key={vIdx} style={{
+                    border: '1px solid var(--border)', borderRadius: 8, padding: 12, marginBottom: 12,
+                  }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+                      <input className="form-input" value={v.name}
+                        onChange={(e) => setVariants((prev) => prev.map((item, i) =>
+                          i === vIdx ? { ...item, name: e.target.value } : item
+                        ))}
+                        style={{ width: 200, fontWeight: 600 }} />
+                      <button className="btn btn-sm" style={{ background: 'var(--danger)', color: '#fff' }}
+                        onClick={() => removeVariant(vIdx)}>Sil</button>
+                    </div>
+
+                    {/* Varyant görseli seç */}
+                    <label className="form-label" style={{ fontSize: 11 }}>Varyant Görseli</label>
+                    <div style={{ display: 'flex', gap: 6, overflowX: 'auto', paddingBottom: 8 }}>
+                      {selectedImages.map((img, imgIdx) => (
+                        <img key={imgIdx} src={img.url} alt=""
+                          onClick={() => setVariantImage(vIdx, imgIdx)}
+                          style={{
+                            width: 60, height: 80, objectFit: 'cover', borderRadius: 6, cursor: 'pointer', flexShrink: 0,
+                            border: v.imageIndex === imgIdx ? '3px solid var(--primary)' : '2px solid var(--border)',
+                          }} />
+                      ))}
+                    </div>
+                  </div>
+                ))}
+
+                <button className="btn" onClick={addVariant} style={{ marginBottom: 16 }}>+ Varyant Ekle</button>
+              </>
+            )}
+
+            <div style={{ display: 'flex', gap: 8 }}>
+              <button className="btn" onClick={prev}>← Geri</button>
               <button className="btn btn-primary" onClick={next}>Devam → Fiyatlandırma</button>
             </div>
           </div>
         )}
 
-        {/* ─── Step 4: Fiyatlandırma ─── */}
+        {/* ═══ STEP 4: Pricing ═══ */}
         {step === 4 && product && (
           <div className="card">
             <div className="card-title">💰 Fiyatlandırma</div>
 
             <div style={{ background: 'var(--bg-card)', borderRadius: 8, padding: 12, marginBottom: 16 }}>
-              <div style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 8 }}>Kaynak Fiyat</div>
+              <div style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 4 }}>Kaynak Fiyat</div>
               <div style={{ fontSize: 18, fontWeight: 700 }}>
-                {product.price.amount} {product.price.currency}
-                {product.price.currency !== 'TRY' && (
-                  <span style={{ fontSize: 14, color: 'var(--text-muted)' }}> → ₺{product.priceTRY}</span>
-                )}
+                {product.price.amount} {product.price.currency} → ₺{product.priceTRY}
               </div>
               <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 4 }}>
-                Hesaplama: {product.price.amount} × {product.price.currency === 'USD' ? '45' : '7'} × 3 → en yakın 100'e yuvarla
+                {product.source === '1688'
+                  ? `Formül: (${product.price.amount} × 7 + 1400) × 3 → en yakın 100`
+                  : `Formül: ${product.price.amount} × 45 × 3 → en yakın 100`}
               </div>
             </div>
 
@@ -533,19 +682,17 @@ export default function ProductImport({ addToast }: Props) {
                   style={{ fontSize: 20, fontWeight: 700 }} />
               </div>
               <div className="form-group">
-                <label className="form-label">Karşılaştırma Fiyatı (₺) — %{discountPct} indirim görüntüsü</label>
+                <label className="form-label">Karşılaştırma Fiyatı (₺) — %{discountPct} indirim</label>
                 <input className="form-input" type="number" step={100} value={comparePrice}
                   onChange={(e) => setComparePrice(Number(e.target.value))}
                   style={{ fontSize: 20, fontWeight: 700, textDecoration: 'line-through', color: 'var(--text-muted)' }} />
               </div>
             </div>
 
-            <div style={{ background: 'var(--bg-card)', borderRadius: 8, padding: 12, marginBottom: 16, textAlign: 'center' }}>
-              <span style={{ fontSize: 24, fontWeight: 700, textDecoration: 'line-through', color: 'var(--text-muted)', marginRight: 12 }}>
-                ₺{comparePrice}
-              </span>
+            <div style={{ background: 'var(--bg-card)', borderRadius: 8, padding: 16, marginBottom: 16, textAlign: 'center' }}>
+              <span style={{ fontSize: 24, fontWeight: 700, textDecoration: 'line-through', color: 'var(--text-muted)', marginRight: 12 }}>₺{comparePrice}</span>
               <span style={{ fontSize: 28, fontWeight: 800, color: 'var(--danger)' }}>₺{sellingPrice}</span>
-              {comparePrice > 0 && (
+              {comparePrice > sellingPrice && (
                 <span style={{ fontSize: 14, color: 'var(--success)', marginLeft: 8 }}>
                   %{Math.round((1 - sellingPrice / comparePrice) * 100)} indirim
                 </span>
@@ -559,15 +706,14 @@ export default function ProductImport({ addToast }: Props) {
           </div>
         )}
 
-        {/* ─── Step 5: Tags ─── */}
+        {/* ═══ STEP 5: Tags ═══ */}
         {step === 5 && (
           <div className="card">
             <div className="card-title">🏷️ Etiketler</div>
             <div className="form-group" style={{ marginBottom: 16 }}>
               <label className="form-label">Etiketler (virgülle ayırın)</label>
               <textarea className="form-input" rows={3} value={tags}
-                onChange={(e) => setTags(e.target.value)}
-                placeholder="elbise, siyah, kadın, yaz" />
+                onChange={(e) => setTags(e.target.value)} placeholder="elbise, siyah, kadın, yaz" />
             </div>
             {tags && (
               <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 16 }}>
@@ -583,15 +729,14 @@ export default function ProductImport({ addToast }: Props) {
           </div>
         )}
 
-        {/* ─── Step 6: Handle ─── */}
+        {/* ═══ STEP 6: Handle ═══ */}
         {step === 6 && (
           <div className="card">
             <div className="card-title">🔗 URL Handle</div>
             <div className="form-group" style={{ marginBottom: 16 }}>
               <label className="form-label">Ürün Handle (URL slug)</label>
-              <input className="form-input" value={handle}
-                onChange={(e) => setHandle(e.target.value)} />
-              <span className="form-hint">Mağaza URL'si: sveltechic.com/products/{handle}</span>
+              <input className="form-input" value={handle} onChange={(e) => setHandle(e.target.value)} />
+              <span className="form-hint">URL: sveltechic.com/products/{handle}</span>
             </div>
             <button className="btn btn-sm" style={{ marginBottom: 16 }}
               onClick={() => setHandle(slugify(enrichedTitle || product?.title || ''))}>
@@ -599,34 +744,88 @@ export default function ProductImport({ addToast }: Props) {
             </button>
             <div style={{ display: 'flex', gap: 8 }}>
               <button className="btn" onClick={prev}>← Geri</button>
-              <button className="btn btn-primary" onClick={next}>Devam → Son Kontrol</button>
+              <button className="btn btn-primary" onClick={next}>Devam → AI Enrichment</button>
             </div>
           </div>
         )}
 
-        {/* ─── Step 7: Final Review ─── */}
+        {/* ═══ STEP 7: AI Enrichment ═══ */}
         {step === 7 && product && (
+          <div className="card">
+            <div className="card-title">🤖 AI Enrichment</div>
+
+            {/* Vision görsel seçimi */}
+            <div className="form-group" style={{ marginBottom: 16 }}>
+              <label className="form-label">Vision Analizi için Görsel Seçin</label>
+              <div style={{ display: 'flex', gap: 8, overflowX: 'auto', paddingBottom: 8 }}>
+                {selectedImages.map((img, idx) => (
+                  <img key={idx} src={img.url} alt=""
+                    onClick={() => setVisionImageIdx(idx)}
+                    style={{
+                      width: 70, height: 90, objectFit: 'cover', borderRadius: 6, cursor: 'pointer', flexShrink: 0,
+                      border: visionImageIdx === idx ? '3px solid var(--primary)' : '2px solid var(--border)',
+                    }} />
+                ))}
+              </div>
+            </div>
+
+            {!enrichment ? (
+              <button className="btn btn-primary" onClick={handleEnrich} disabled={enriching}>
+                {enriching ? <><span className="spinner" /> Enrichment yapılıyor...</> : '🧠 Enrichment Başlat'}
+              </button>
+            ) : (
+              <div>
+                <div className="form-group" style={{ marginBottom: 16 }}>
+                  <label className="form-label">Önerilen Başlık</label>
+                  <input className="form-input" value={enrichedTitle} onChange={(e) => setEnrichedTitle(e.target.value)} />
+                </div>
+                <div className="form-group" style={{ marginBottom: 16 }}>
+                  <label className="form-label">Önerilen Açıklama</label>
+                  <textarea className="form-input" rows={5} value={enrichedDesc} onChange={(e) => setEnrichedDesc(e.target.value)} />
+                </div>
+
+                {enrichment.google && (
+                  <div style={{ background: 'var(--bg-card)', borderRadius: 8, padding: 12, marginBottom: 16 }}>
+                    <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 8 }}>Google Shopping & Meta Verileri</div>
+                    <div style={{ fontSize: 11, display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 4 }}>
+                      {Object.entries(enrichment.google).slice(0, 14).map(([k, v]) => (
+                        <div key={k}><span style={{ color: 'var(--text-muted)' }}>{k}:</span> {String(v).slice(0, 50)}</div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                <div style={{ display: 'flex', gap: 8 }}>
+                  <button className="btn" onClick={prev}>← Geri</button>
+                  <button className="btn btn-primary" onClick={next}>Devam → Son Kontrol</button>
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* ═══ STEP 8: Final Review ═══ */}
+        {step === 8 && product && (
           <div className="card">
             <div className="card-title">✅ Son Kontrol</div>
 
-            <div style={{ display: 'grid', gap: 12, marginBottom: 20 }}>
-              {/* Summary rows */}
+            <div style={{ display: 'grid', gap: 10, marginBottom: 20 }}>
               {[
-                { label: '📝 Başlık', value: enrichedTitle || product.title, step: 2 },
-                { label: '🖼️ Görseller', value: `${images.filter((i) => i.selected).length} adet seçili`, step: 3 },
-                { label: '💰 Satış Fiyatı', value: `₺${sellingPrice}`, step: 4 },
-                { label: '💰 Karşılaştırma', value: `₺${comparePrice}`, step: 4 },
+                { label: '📝 Başlık', value: enrichedTitle || product.title, step: 7 },
+                { label: '🖼️ Görseller', value: `${selectedImages.length} adet`, step: 2 },
+                { label: '🎨 Varyantlar', value: useVariants ? `${variants.length} varyant × ${sizes.join(',')}` : `${sizes.join(', ')}`, step: 3 },
+                { label: '💰 Fiyat', value: `₺${sellingPrice} (karş: ₺${comparePrice})`, step: 4 },
                 { label: '🏷️ Etiketler', value: tags || '(boş)', step: 5 },
                 { label: '🔗 Handle', value: handle, step: 6 },
-                { label: '📏 Bedenler', value: product.sizes.join(', ') || 'Tek beden', step: 1 },
+                { label: '🤖 Enrichment', value: enrichment ? '✅ Yapıldı' : '⚠️ Yapılmadı', step: 7 },
               ].map((row) => (
                 <div key={row.label} style={{
                   display: 'flex', justifyContent: 'space-between', alignItems: 'center',
                   padding: '10px 12px', background: 'var(--bg-card)', borderRadius: 8,
                 }}>
                   <div>
-                    <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>{row.label}</span>
-                    <div style={{ fontSize: 14, fontWeight: 600, marginTop: 2 }}>{row.value}</div>
+                    <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>{row.label}</span>
+                    <div style={{ fontSize: 13, fontWeight: 600, marginTop: 2 }}>{row.value}</div>
                   </div>
                   <button className="btn btn-sm" onClick={() => goTo(row.step)}>Düzenle</button>
                 </div>
@@ -634,28 +833,44 @@ export default function ProductImport({ addToast }: Props) {
             </div>
 
             {/* Preview images */}
-            <div style={{ display: 'flex', gap: 8, overflowX: 'auto', marginBottom: 20, paddingBottom: 8 }}>
-              {images.filter((i) => i.selected).sort((a, b) => a.order - b.order).map((img, i) => (
-                <img key={i} src={img.url} alt="" style={{ width: 80, height: 100, objectFit: 'cover', borderRadius: 6, flexShrink: 0 }} />
+            <div style={{ display: 'flex', gap: 6, overflowX: 'auto', marginBottom: 20, paddingBottom: 8 }}>
+              {selectedImages.map((img, i) => (
+                <img key={i} src={img.url} alt="" style={{ width: 70, height: 90, objectFit: 'cover', borderRadius: 6, flexShrink: 0 }} />
               ))}
             </div>
 
             {pushResult ? (
-              <div style={{ background: 'var(--bg-card)', borderRadius: 8, padding: 16, textAlign: 'center' }}>
-                <div style={{ fontSize: 40, marginBottom: 8 }}>🎉</div>
-                <div style={{ fontSize: 16, fontWeight: 700, marginBottom: 4 }}>Ürün Oluşturuldu!</div>
-                <div style={{ fontSize: 13, color: 'var(--text-muted)' }}>
-                  {pushResult.title} — {pushResult.status}
+              <div>
+                <div style={{ background: 'var(--bg-card)', borderRadius: 8, padding: 16, textAlign: 'center', marginBottom: 16 }}>
+                  <div style={{ fontSize: 40, marginBottom: 8 }}>🎉</div>
+                  <div style={{ fontSize: 16, fontWeight: 700 }}>Ürün Oluşturuldu!</div>
+                  <div style={{ fontSize: 13, color: 'var(--text-muted)' }}>{pushResult.title} — {pushResult.status}</div>
+                  <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 4 }}>ID: {pushResult.id}</div>
                 </div>
-                <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 4 }}>
-                  ID: {pushResult.id}
-                </div>
+
+                {/* Sync buttons */}
+                {enrichment && (
+                  <div style={{ display: 'flex', gap: 8, justifyContent: 'center' }}>
+                    <button className="btn btn-primary" onClick={handleSyncMeta}
+                      disabled={syncingMeta || metaSynced}
+                      style={{ background: metaSynced ? 'var(--success)' : undefined }}>
+                      {syncingMeta ? <><span className="spinner" /> Meta Sync...</>
+                        : metaSynced ? '✅ Meta Synced' : '📡 Meta Catalog\'a Gönder'}
+                    </button>
+                    <button className="btn btn-primary" onClick={handleSyncGoogle}
+                      disabled={syncingGoogle || googleSynced}
+                      style={{ background: googleSynced ? 'var(--success)' : undefined }}>
+                      {syncingGoogle ? <><span className="spinner" /> Google Sync...</>
+                        : googleSynced ? '✅ Google Synced' : '🔍 Google Merchant\'a Gönder'}
+                    </button>
+                  </div>
+                )}
               </div>
             ) : (
               <div style={{ display: 'flex', gap: 8 }}>
                 <button className="btn" onClick={prev}>← Geri</button>
                 <button className="btn btn-primary" onClick={handlePush} disabled={pushing}
-                  style={{ flex: 1, fontSize: 16, padding: '14px 20px' }}>
+                  style={{ flex: 1, fontSize: 15, padding: '14px 20px' }}>
                   {pushing ? <><span className="spinner" /> Shopify'a gönderiliyor...</> : '🚀 Shopify\'a Gönder'}
                 </button>
               </div>
