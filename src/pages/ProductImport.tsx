@@ -101,10 +101,6 @@ export default function ProductImport({ addToast }: Props) {
   // Step 8 — Push
   const [pushing, setPushing] = useState(false)
   const [pushResult, setPushResult] = useState<any>(null)
-  const [syncingMeta, setSyncingMeta] = useState(false)
-  const [syncingGoogle, setSyncingGoogle] = useState(false)
-  const [metaSynced, setMetaSynced] = useState(false)
-  const [googleSynced, setGoogleSynced] = useState(false)
 
   // ────────────────── Step 1: Scrape ──────────────────
   const handleScrape = async () => {
@@ -353,97 +349,6 @@ export default function ProductImport({ addToast }: Props) {
       addToast({ type: 'error', message: err.message })
     } finally {
       setPushing(false)
-    }
-  }
-
-  // ────────────────── Post-push: Sync ──────────────────
-  const handleSyncMeta = async () => {
-    if (!pushResult || !enrichment) return
-    setSyncingMeta(true)
-
-    try {
-      const g = enrichment.google || {}
-      const m = enrichment.meta || {}
-      const metaItems = (pushResult.variants || [{ id: 'default' }]).map((v: any) => ({
-        retailer_id: v.id?.replace(/\D/g, '') || pushResult.id?.replace(/\D/g, ''),
-        enrichment: {
-          gender: g.gender || 'female',
-          age_group: g.age_group || 'adult',
-          color: g.color,
-          size: 'Tek Beden',
-          material: g.material,
-          pattern: g.pattern,
-          fb_product_category: m.fb_product_category,
-          short_description: m.short_description,
-          custom_label_0: g.custom_label_0,
-          custom_label_1: g.custom_label_1,
-          custom_label_2: g.custom_label_2,
-          custom_label_3: g.custom_label_3,
-          custom_label_4: g.custom_label_4,
-        },
-      }))
-
-      const res = await fetch('/api/sync-meta-catalog', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ items: metaItems }),
-      })
-      const data = await res.json()
-      if (data.success) {
-        setMetaSynced(true)
-        addToast({ type: 'success', message: 'Meta Catalog sync başarılı!' })
-      } else {
-        addToast({ type: 'error', message: `Meta sync: ${data.error || 'hata'}` })
-      }
-    } catch (err: any) {
-      addToast({ type: 'error', message: err.message })
-    } finally {
-      setSyncingMeta(false)
-    }
-  }
-
-  const handleSyncGoogle = async () => {
-    if (!pushResult || !enrichment) return
-    setSyncingGoogle(true)
-
-    try {
-      const g = enrichment.google || {}
-      const productNumericId = pushResult.id?.replace(/\D/g, '')
-      const googleItems = (pushResult.variants || [{ id: pushResult.id }]).map((v: any) => ({
-        productId: productNumericId,
-        variantId: v.id?.replace(/\D/g, '') || productNumericId,
-        enrichment: {
-          gender: g.gender || 'female',
-          age_group: g.age_group || 'adult',
-          color: g.color,
-          size: 'Tek Beden',
-          material: g.material,
-          pattern: g.pattern,
-          product_type: g.product_type,
-          custom_label_0: g.custom_label_0,
-          custom_label_1: g.custom_label_1,
-          custom_label_2: g.custom_label_2,
-          custom_label_3: g.custom_label_3,
-          custom_label_4: g.custom_label_4,
-        },
-      }))
-
-      const res = await fetch('/api/sync-google', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ items: googleItems }),
-      })
-      const data = await res.json()
-      if (data.success) {
-        setGoogleSynced(true)
-        addToast({ type: 'success', message: 'Google Merchant sync başarılı!' })
-      } else {
-        addToast({ type: 'error', message: `Google sync: ${data.error || 'hata'}` })
-      }
-    } catch (err: any) {
-      addToast({ type: 'error', message: err.message })
-    } finally {
-      setSyncingGoogle(false)
     }
   }
 
@@ -840,31 +745,14 @@ export default function ProductImport({ addToast }: Props) {
             </div>
 
             {pushResult ? (
-              <div>
-                <div style={{ background: 'var(--bg-card)', borderRadius: 8, padding: 16, textAlign: 'center', marginBottom: 16 }}>
-                  <div style={{ fontSize: 40, marginBottom: 8 }}>🎉</div>
-                  <div style={{ fontSize: 16, fontWeight: 700 }}>Ürün Oluşturuldu!</div>
-                  <div style={{ fontSize: 13, color: 'var(--text-muted)' }}>{pushResult.title} — {pushResult.status}</div>
-                  <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 4 }}>ID: {pushResult.id}</div>
+              <div style={{ background: 'var(--bg-card)', borderRadius: 8, padding: 16, textAlign: 'center' }}>
+                <div style={{ fontSize: 40, marginBottom: 8 }}>🎉</div>
+                <div style={{ fontSize: 16, fontWeight: 700 }}>Ürün Oluşturuldu!</div>
+                <div style={{ fontSize: 13, color: 'var(--text-muted)' }}>{pushResult.title} — {pushResult.status}</div>
+                <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 4 }}>ID: {pushResult.id}</div>
+                <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 8 }}>
+                  💡 Meta ve Google sync için AI Enrichment sayfasını kullanın
                 </div>
-
-                {/* Sync buttons */}
-                {enrichment && (
-                  <div style={{ display: 'flex', gap: 8, justifyContent: 'center' }}>
-                    <button className="btn btn-primary" onClick={handleSyncMeta}
-                      disabled={syncingMeta || metaSynced}
-                      style={{ background: metaSynced ? 'var(--success)' : undefined }}>
-                      {syncingMeta ? <><span className="spinner" /> Meta Sync...</>
-                        : metaSynced ? '✅ Meta Synced' : '📡 Meta Catalog\'a Gönder'}
-                    </button>
-                    <button className="btn btn-primary" onClick={handleSyncGoogle}
-                      disabled={syncingGoogle || googleSynced}
-                      style={{ background: googleSynced ? 'var(--success)' : undefined }}>
-                      {syncingGoogle ? <><span className="spinner" /> Google Sync...</>
-                        : googleSynced ? '✅ Google Synced' : '🔍 Google Merchant\'a Gönder'}
-                    </button>
-                  </div>
-                )}
               </div>
             ) : (
               <div style={{ display: 'flex', gap: 8 }}>
