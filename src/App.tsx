@@ -1,13 +1,15 @@
 import { useState } from 'react'
 import PriceRounder from './pages/PriceRounder'
 import ProductEnrichment from './pages/ProductEnrichment'
+import ProductImport from './pages/ProductImport'
 import Toast, { ToastData } from './components/Toast'
 
-type Page = 'price-rounder' | 'product-enrichment'
+type Page = 'price-rounder' | 'product-enrichment' | 'product-import'
 
 const navItems: { id: Page; icon: string; label: string }[] = [
   { id: 'price-rounder', icon: '₺', label: 'Fiyat Yuvarlama' },
   { id: 'product-enrichment', icon: '🧠', label: 'AI Enrichment' },
+  { id: 'product-import', icon: '📦', label: 'Ürün Import' },
 ]
 
 export default function App() {
@@ -48,13 +50,14 @@ export default function App() {
           ))}
         </nav>
 
-        <div className="sidebar-footer">v0.1.0 · Netlify Functions</div>
+        <div className="sidebar-footer">v0.2.0 · Netlify Functions</div>
       </aside>
 
       {/* Main */}
       <main className="main-content">
         {activePage === 'price-rounder' && <PriceRounder addToast={addToast} />}
         {activePage === 'product-enrichment' && <ProductEnrichment addToast={addToast} />}
+        {activePage === 'product-import' && <ProductImport addToast={addToast} />}
       </main>
 
       <Toast toasts={toasts} />
