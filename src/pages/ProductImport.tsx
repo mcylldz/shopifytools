@@ -30,7 +30,15 @@ interface ImageItem {
 interface VariantItem {
   name: string
   sizes: string[]
-  imageIndex: number | null // hangi görsel bu varyanta ait
+  imageIndex: number | null
+}
+
+interface VtonResult {
+  id: string
+  mode: string
+  imageUrl: string
+  prompt: string
+  selected: boolean // Shopify'a gönderilecek mi
 }
 
 const STEPS = [
@@ -40,8 +48,20 @@ const STEPS = [
   { id: 4, icon: '💰', label: 'Fiyat' },
   { id: 5, icon: '🏷️', label: 'Etiketler' },
   { id: 6, icon: '🤖', label: 'AI Enrichment' },
-  { id: 7, icon: '🔗', label: 'Handle' },
-  { id: 8, icon: '✅', label: 'Son Kontrol' },
+  { id: 7, icon: '👗', label: 'VTON' },
+  { id: 8, icon: '🔗', label: 'Handle' },
+  { id: 9, icon: '✅', label: 'Son Kontrol' },
+]
+
+const GARMENT_CATEGORIES = [
+  { value: 'top', label: 'Üst Giyim (T-shirt, Bluz, Gömlek)' },
+  { value: 'bottom', label: 'Alt Giyim (Pantolon, Etek)' },
+  { value: 'dress', label: 'Elbise' },
+  { value: 'jacket', label: 'Ceket / Mont' },
+  { value: 'knitwear', label: 'Triko / Kazak' },
+  { value: 'activewear', label: 'Spor Giyim' },
+  { value: 'swimwear', label: 'Mayo / Bikini' },
+  { value: 'accessory', label: 'Aksesuar' },
 ]
 
 function roundTo100(n: number): number {
@@ -88,17 +108,31 @@ export default function ProductImport({ addToast }: Props) {
   // Step 5 — Tags
   const [tags, setTags] = useState('')
 
-  // Step 6 — Handle
-  const [handle, setHandle] = useState('')
-
-  // Step 7 — Enrichment
+  // Step 6 — Enrichment
   const [enrichment, setEnrichment] = useState<any>(null)
   const [enriching, setEnriching] = useState(false)
   const [enrichedTitle, setEnrichedTitle] = useState('')
   const [enrichedDesc, setEnrichedDesc] = useState('')
   const [visionImageIdx, setVisionImageIdx] = useState(0)
 
-  // Step 8 — Push
+  // Step 7 — VTON
+  const [vtonMode, setVtonMode] = useState<'standard' | 'ghost' | 'fabric'>('standard')
+  const [garmentCategory, setGarmentCategory] = useState('top')
+  const [fabricInfo, setFabricInfo] = useState('')
+  const [modelUrl, setModelUrl] = useState('')
+  const [modelImages, setModelImages] = useState<string[]>([])
+  const [modelTitle, setModelTitle] = useState('')
+  const [scrapingModel, setScrapingModel] = useState(false)
+  const [selectedProductImg, setSelectedProductImg] = useState(0)
+  const [selectedModelImg, setSelectedModelImg] = useState(0)
+  const [vtonGenerating, setVtonGenerating] = useState(false)
+  const [vtonResults, setVtonResults] = useState<VtonResult[]>([])
+  const [vtonProgress, setVtonProgress] = useState('')
+
+  // Step 8 — Handle
+  const [handle, setHandle] = useState('')
+
+  // Step 9 — Push
   const [pushing, setPushing] = useState(false)
   const [pushResult, setPushResult] = useState<any>(null)
 
@@ -138,8 +172,6 @@ export default function ProductImport({ addToast }: Props) {
       setTags(p.tags || '')
       setEnrichedTitle(p.title)
       setEnrichedDesc('')
-
-      // Default tek varyant
       setVariants([{ name: p.colors?.[0] || 'Varsayılan', sizes: [...p.sizes], imageIndex: 0 }])
 
       addToast({ type: 'success', message: `${p.source === 'shopify' ? 'Shopify' : '1688'} ürünü çekildi!` })
@@ -155,15 +187,12 @@ export default function ProductImport({ addToast }: Props) {
     if (p.source === 'shopify') {
       baseTRY = p.price.amount * 45
     }
-    // 1688 priceTRY zaten (CNY×7+1400) olarak gelir
     const selling = roundTo100(baseTRY * 2)
     setSellingPrice(selling)
-
     const discounts = [0.4, 0.5, 0.6]
     const disc = discounts[Math.floor(Math.random() * discounts.length)]
     setDiscountPct(Math.round(disc * 100))
-    const compare = roundTo100(selling / (1 - disc))
-    setComparePrice(compare)
+    setComparePrice(roundTo100(selling / (1 - disc)))
   }
 
   // ────────────────── Step 2: Image helpers ──────────────────
@@ -200,7 +229,7 @@ export default function ProductImport({ addToast }: Props) {
 
   // ────────────────── Step 3: Variant helpers ──────────────────
   const addVariant = () => {
-    const name = prompt('Varyant adı (ör: Siyah, Beyaz):')
+    const name = window.prompt('Varyant adı (ör: Siyah, Beyaz):')
     if (name) setVariants((prev) => [...prev, { name, sizes: [...sizes], imageIndex: null }])
   }
 
@@ -226,7 +255,7 @@ export default function ProductImport({ addToast }: Props) {
     setVariants((prev) => prev.map((v) => ({ ...v, sizes: v.sizes.filter((s) => s !== size) })))
   }
 
-  // ────────────────── Step 7: Enrichment ──────────────────
+  // ────────────────── Step 6: Enrichment ──────────────────
   const handleEnrich = async () => {
     if (!product) return
     setEnriching(true)
@@ -254,7 +283,7 @@ export default function ProductImport({ addToast }: Props) {
             product_id: 'import_new',
             title: enrichedTitle || product.title,
             body_html: product.description,
-            tags: tags,
+            tags,
             vendor: product.vendor || '',
             product_type: product.productType || '',
             images: selectedImgs.slice(0, 3).map((i) => i.url),
@@ -281,7 +310,167 @@ export default function ProductImport({ addToast }: Props) {
     }
   }
 
-  // ────────────────── Step 8: Push ──────────────────
+  // ────────────────── Step 7: VTON ──────────────────
+  const handleScrapeModel = async () => {
+    if (!modelUrl) return
+    setScrapingModel(true)
+    setModelImages([])
+    setModelTitle('')
+
+    try {
+      const res = await fetch('/api/scrape-model-images', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ url: modelUrl }),
+      })
+      const data = await res.json()
+      if (!data.success) throw new Error(data.error)
+
+      setModelImages(data.images || [])
+      setModelTitle(data.title || '')
+      addToast({ type: 'success', message: `${data.images.length} manken görseli çekildi` })
+    } catch (err: any) {
+      addToast({ type: 'error', message: err.message })
+    } finally {
+      setScrapingModel(false)
+    }
+  }
+
+  const handleVtonGenerate = async () => {
+    if (!product) return
+    const selectedImgs = images.filter((i) => i.selected).sort((a, b) => a.order - b.order)
+    const productImg = selectedImgs[selectedProductImg]?.url
+    if (!productImg) { addToast({ type: 'error', message: 'Ürün görseli seçin' }); return }
+
+    if (vtonMode === 'standard' && !modelImages[selectedModelImg]) {
+      addToast({ type: 'error', message: 'Manken görseli seçin' }); return
+    }
+
+    setVtonGenerating(true)
+    setVtonProgress('Analiz yapılıyor...')
+
+    try {
+      let modelDesc = ''
+      let garmentDesc = ''
+
+      if (vtonMode === 'standard') {
+        // Paralel: manken + ürün analizi
+        setVtonProgress('🔍 Manken ve ürün analizi (paralel)...')
+        const [modelRes, garmentRes] = await Promise.all([
+          fetch('/api/vton-analyze', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              imageUrl: modelImages[selectedModelImg],
+              mode: 'model',
+            }),
+          }).then((r) => r.json()),
+          fetch('/api/vton-analyze', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              imageUrl: productImg,
+              mode: 'garment',
+              productTitle: enrichedTitle || product.title,
+              garmentCategory,
+              fabricInfo: fabricInfo || undefined,
+            }),
+          }).then((r) => r.json()),
+        ])
+
+        if (!modelRes.success) throw new Error(`Manken analizi: ${modelRes.error}`)
+        if (!garmentRes.success) throw new Error(`Ürün analizi: ${garmentRes.error}`)
+
+        modelDesc = modelRes.description
+        garmentDesc = garmentRes.description
+      } else if (vtonMode === 'ghost') {
+        // Sadece ürün analizi
+        setVtonProgress('🔍 Ürün analizi (ghost mode)...')
+        const res = await fetch('/api/vton-analyze', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            imageUrl: productImg,
+            mode: 'ghost',
+            productTitle: enrichedTitle || product.title,
+            garmentCategory,
+            fabricInfo: fabricInfo || undefined,
+          }),
+        })
+        const data = await res.json()
+        if (!data.success) throw new Error(data.error)
+        garmentDesc = data.description
+      }
+      // Fabric mode: analiz yok
+
+      // FAL AI görsel üret
+      setVtonProgress('🎨 Görsel üretiliyor (FAL AI)...')
+
+      const imageUrls = vtonMode === 'standard'
+        ? [modelImages[selectedModelImg], productImg]
+        : [productImg]
+
+      const genRes = await fetch('/api/vton-generate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          mode: vtonMode,
+          modelDesc,
+          garmentDesc,
+          productTitle: enrichedTitle || product.title,
+          garmentCategory,
+          fabricInfo: fabricInfo || undefined,
+          imageUrls,
+          resolution: '2K',
+          aspectRatio: '9:16',
+        }),
+      })
+      const genData = await genRes.json()
+      if (!genData.success) throw new Error(genData.error)
+
+      if (genData.images?.length > 0) {
+        const newResults: VtonResult[] = genData.images.map((img: any, idx: number) => ({
+          id: `vton_${Date.now()}_${idx}`,
+          mode: vtonMode,
+          imageUrl: img.url,
+          prompt: vtonMode,
+          selected: false,
+        }))
+        setVtonResults((prev) => [...newResults, ...prev])
+        addToast({ type: 'success', message: `✅ VTON görseli üretildi!` })
+      } else {
+        addToast({ type: 'info', message: 'Görsel üretilemedi' })
+      }
+    } catch (err: any) {
+      addToast({ type: 'error', message: err.message })
+    } finally {
+      setVtonGenerating(false)
+      setVtonProgress('')
+    }
+  }
+
+  const toggleVtonResult = (id: string) => {
+    setVtonResults((prev) => prev.map((r) =>
+      r.id === id ? { ...r, selected: !r.selected } : r
+    ))
+  }
+
+  const addVtonToImages = () => {
+    const selected = vtonResults.filter((r) => r.selected)
+    if (selected.length === 0) { addToast({ type: 'info', message: 'Hiçbir VTON görseli seçilmedi' }); return }
+
+    setImages((prev) => {
+      const newImages = selected.map((r, i) => ({
+        url: r.imageUrl,
+        selected: true,
+        order: prev.length + i,
+      }))
+      return [...prev, ...newImages]
+    })
+    addToast({ type: 'success', message: `${selected.length} VTON görseli eklendi` })
+  }
+
+  // ────────────────── Step 9: Push ──────────────────
   const handlePush = async () => {
     if (!product) return
     setPushing(true)
@@ -327,7 +516,6 @@ export default function ProductImport({ addToast }: Props) {
 
       setPushResult(data.product)
 
-      // Metafield'ları kaydet
       if (enrichment) {
         try {
           await fetch('/api/save-metafields', {
@@ -341,7 +529,7 @@ export default function ProductImport({ addToast }: Props) {
               addFinishTag: false,
             }),
           })
-        } catch { /* metafield kaydetme opsiyonel */ }
+        } catch { /* opsiyonel */ }
       }
 
       addToast({ type: 'success', message: `✅ Ürün oluşturuldu: ${data.product.title}` })
@@ -353,7 +541,7 @@ export default function ProductImport({ addToast }: Props) {
   }
 
   const goTo = (s: number) => setStep(s)
-  const next = () => setStep((s) => Math.min(s + 1, 8))
+  const next = () => setStep((s) => Math.min(s + 1, 9))
   const prev = () => setStep((s) => Math.max(s - 1, 1))
 
   const selectedImages = images.filter((i) => i.selected).sort((a, b) => a.order - b.order)
@@ -468,19 +656,6 @@ export default function ProductImport({ addToast }: Props) {
               <input ref={fileRef} type="file" accept="image/*" multiple hidden onChange={handleFileUpload} />
             </div>
 
-            <details style={{ marginBottom: 16 }}>
-              <summary style={{ cursor: 'pointer', fontSize: 12, color: 'var(--text-muted)' }}>📋 Görsel URL'leri</summary>
-              <div style={{ background: 'var(--bg-card)', borderRadius: 8, padding: 8, marginTop: 8, fontSize: 11, fontFamily: 'monospace' }}>
-                {selectedImages.map((img, i) => (
-                  <div key={i} style={{ marginBottom: 4 }}>
-                    <a href={img.url} target="_blank" rel="noreferrer" style={{ color: 'var(--primary)', wordBreak: 'break-all' }}>
-                      {img.url.slice(0, 100)}{img.url.length > 100 ? '...' : ''}
-                    </a>
-                  </div>
-                ))}
-              </div>
-            </details>
-
             <div style={{ display: 'flex', gap: 8 }}>
               <button className="btn" onClick={prev}>← Geri</button>
               <button className="btn btn-primary" onClick={next}>Devam → Varyantlar</button>
@@ -493,7 +668,6 @@ export default function ProductImport({ addToast }: Props) {
           <div className="card">
             <div className="card-title">🎨 Varyantlar</div>
 
-            {/* Bedenler — düzenlenebilir */}
             <div className="form-group" style={{ marginBottom: 16 }}>
               <label className="form-label">Bedenler</label>
               <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 8 }}>
@@ -512,20 +686,17 @@ export default function ProductImport({ addToast }: Props) {
               </div>
             </div>
 
-            {/* Varyant kullanımı */}
             <div className="form-group" style={{ marginBottom: 16 }}>
               <label className="checkbox-row">
                 <input type="checkbox" checked={useVariants} onChange={(e) => setUseVariants(e.target.checked)} />
-                Renk / model varyantları kullan (1688'den birden fazla varyant)
+                Renk / model varyantları kullan
               </label>
             </div>
 
             {useVariants && (
               <>
                 {variants.map((v, vIdx) => (
-                  <div key={vIdx} style={{
-                    border: '1px solid var(--border)', borderRadius: 8, padding: 12, marginBottom: 12,
-                  }}>
+                  <div key={vIdx} style={{ border: '1px solid var(--border)', borderRadius: 8, padding: 12, marginBottom: 12 }}>
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
                       <input className="form-input" value={v.name}
                         onChange={(e) => setVariants((prev) => prev.map((item, i) =>
@@ -535,8 +706,6 @@ export default function ProductImport({ addToast }: Props) {
                       <button className="btn btn-sm" style={{ background: 'var(--danger)', color: '#fff' }}
                         onClick={() => removeVariant(vIdx)}>Sil</button>
                     </div>
-
-                    {/* Varyant görseli seç */}
                     <label className="form-label" style={{ fontSize: 11 }}>Varyant Görseli</label>
                     <div style={{ display: 'flex', gap: 6, overflowX: 'auto', paddingBottom: 8 }}>
                       {selectedImages.map((img, imgIdx) => (
@@ -550,7 +719,6 @@ export default function ProductImport({ addToast }: Props) {
                     </div>
                   </div>
                 ))}
-
                 <button className="btn" onClick={addVariant} style={{ marginBottom: 16 }}>+ Varyant Ekle</button>
               </>
             )}
@@ -639,7 +807,6 @@ export default function ProductImport({ addToast }: Props) {
           <div className="card">
             <div className="card-title">🤖 AI Enrichment</div>
 
-            {/* Vision görsel seçimi */}
             <div className="form-group" style={{ marginBottom: 16 }}>
               <label className="form-label">Vision Analizi için Görsel Seçin</label>
               <div style={{ display: 'flex', gap: 8, overflowX: 'auto', paddingBottom: 8 }}>
@@ -682,15 +849,172 @@ export default function ProductImport({ addToast }: Props) {
 
                 <div style={{ display: 'flex', gap: 8 }}>
                   <button className="btn" onClick={prev}>← Geri</button>
-                  <button className="btn btn-primary" onClick={next}>Devam → Handle</button>
+                  <button className="btn btn-primary" onClick={next}>Devam → VTON</button>
                 </div>
               </div>
             )}
           </div>
         )}
 
-        {/* ═══ STEP 7: Handle ═══ */}
-        {step === 7 && (
+        {/* ═══ STEP 7: VTON ═══ */}
+        {step === 7 && product && (
+          <div className="card">
+            <div className="card-title">👗 Virtual Try-On (VTON)</div>
+
+            {/* Mod & Kategori */}
+            <div style={{ display: 'flex', gap: 12, marginBottom: 16, flexWrap: 'wrap' }}>
+              <div className="form-group" style={{ flex: 1, minWidth: 200 }}>
+                <label className="form-label">Mod</label>
+                <div style={{ display: 'flex', gap: 4 }}>
+                  {[
+                    { v: 'standard' as const, icon: '👤', label: 'Standard VTON' },
+                    { v: 'ghost' as const, icon: '👻', label: 'Ghost Mode' },
+                    { v: 'fabric' as const, icon: '🧵', label: 'Fabric Mode' },
+                  ].map((m) => (
+                    <button key={m.v} className="btn btn-sm"
+                      onClick={() => setVtonMode(m.v)}
+                      style={{
+                        background: vtonMode === m.v ? 'var(--primary)' : undefined,
+                        color: vtonMode === m.v ? '#fff' : undefined,
+                        fontSize: 11, flex: 1,
+                      }}>
+                      {m.icon} {m.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div className="form-group" style={{ flex: 1, minWidth: 200 }}>
+                <label className="form-label">Ürün Kategorisi</label>
+                <select className="form-input" value={garmentCategory}
+                  onChange={(e) => setGarmentCategory(e.target.value)}>
+                  {GARMENT_CATEGORIES.map((c) => (
+                    <option key={c.value} value={c.value}>{c.label}</option>
+                  ))}
+                </select>
+              </div>
+            </div>
+
+            {/* Kumaş bilgisi */}
+            <div className="form-group" style={{ marginBottom: 16 }}>
+              <label className="form-label">Kumaş Bilgisi (opsiyonel)</label>
+              <input className="form-input" placeholder="ör: %100 pamuk, kalın french terry, saten..."
+                value={fabricInfo} onChange={(e) => setFabricInfo(e.target.value)} />
+            </div>
+
+            {/* Split Screen: Sol = Ürün, Sağ = Manken */}
+            <div style={{ display: 'grid', gridTemplateColumns: vtonMode === 'standard' ? '1fr 1fr' : '1fr', gap: 16, marginBottom: 16 }}>
+              {/* SOL — Ürün Görselleri */}
+              <div>
+                <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 8, color: 'var(--primary)' }}>
+                  📷 Ürün Görselleri — Birini seçin
+                </div>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(80px, 1fr))', gap: 6 }}>
+                  {selectedImages.map((img, idx) => (
+                    <img key={idx} src={img.url} alt=""
+                      onClick={() => setSelectedProductImg(idx)}
+                      style={{
+                        width: '100%', height: 110, objectFit: 'cover', borderRadius: 6, cursor: 'pointer',
+                        border: selectedProductImg === idx ? '3px solid var(--primary)' : '2px solid var(--border)',
+                      }} />
+                  ))}
+                </div>
+              </div>
+
+              {/* SAĞ — Manken Görselleri (Sadece standard modda) */}
+              {vtonMode === 'standard' && (
+                <div>
+                  <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 8, color: 'var(--success)' }}>
+                    👤 Manken Görselleri — Birini seçin
+                  </div>
+
+                  {/* Manken URL Scrape */}
+                  <div style={{ display: 'flex', gap: 6, marginBottom: 8 }}>
+                    <input className="form-input" placeholder="https://store.com/products/model-urun"
+                      value={modelUrl} onChange={(e) => setModelUrl(e.target.value)}
+                      style={{ flex: 1, fontSize: 11 }} />
+                    <button className="btn btn-sm" onClick={handleScrapeModel} disabled={scrapingModel || !modelUrl}>
+                      {scrapingModel ? '⏳' : '🔍'}
+                    </button>
+                  </div>
+                  {modelTitle && (
+                    <div style={{ fontSize: 10, color: 'var(--text-muted)', marginBottom: 6 }}>{modelTitle}</div>
+                  )}
+
+                  {modelImages.length > 0 ? (
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(80px, 1fr))', gap: 6 }}>
+                      {modelImages.map((img, idx) => (
+                        <img key={idx} src={img} alt=""
+                          onClick={() => setSelectedModelImg(idx)}
+                          style={{
+                            width: '100%', height: 110, objectFit: 'cover', borderRadius: 6, cursor: 'pointer',
+                            border: selectedModelImg === idx ? '3px solid var(--success)' : '2px solid var(--border)',
+                          }} />
+                      ))}
+                    </div>
+                  ) : (
+                    <div style={{ padding: 20, textAlign: 'center', color: 'var(--text-muted)', fontSize: 12,
+                      border: '2px dashed var(--border)', borderRadius: 8 }}>
+                      Shopify ürün URL'si yapıştırıp manken görsellerini çekin
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+
+            {/* Generate Button */}
+            <button className="btn btn-primary" onClick={handleVtonGenerate} disabled={vtonGenerating}
+              style={{ width: '100%', padding: '14px 20px', fontSize: 14, marginBottom: 16 }}>
+              {vtonGenerating ? (
+                <><span className="spinner" /> {vtonProgress || 'İşleniyor...'}</>
+              ) : (
+                vtonMode === 'standard' ? '🎨 VTON Üret (Manken + Ürün)' :
+                vtonMode === 'ghost' ? '👻 Ghost Görsel Üret' :
+                '🧵 Kumaş Makro Üret'
+              )}
+            </button>
+
+            {/* Sonuçlar */}
+            {vtonResults.length > 0 && (
+              <div style={{ marginBottom: 16 }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+                  <div style={{ fontSize: 12, fontWeight: 600 }}>
+                    🖼️ Üretilen Görseller ({vtonResults.length})
+                  </div>
+                  <button className="btn btn-sm" onClick={addVtonToImages}
+                    style={{ background: 'var(--success)', color: '#fff' }}>
+                    ✅ Seçilenleri Ürün Görsellerine Ekle ({vtonResults.filter((r) => r.selected).length})
+                  </button>
+                </div>
+
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(150px, 1fr))', gap: 10 }}>
+                  {vtonResults.map((r) => (
+                    <div key={r.id} onClick={() => toggleVtonResult(r.id)}
+                      style={{
+                        border: r.selected ? '3px solid var(--success)' : '2px solid var(--border)',
+                        borderRadius: 8, overflow: 'hidden', cursor: 'pointer',
+                        opacity: r.selected ? 1 : 0.7, transition: 'all .2s', position: 'relative',
+                      }}>
+                      <img src={r.imageUrl} alt="" style={{ width: '100%', height: 200, objectFit: 'cover' }} />
+                      <div style={{ padding: '4px 8px', fontSize: 10, color: 'var(--text-muted)', display: 'flex', justifyContent: 'space-between' }}>
+                        <span>{r.mode === 'standard' ? '👤' : r.mode === 'ghost' ? '👻' : '🧵'} {r.mode}</span>
+                        <span>{r.selected ? '✅' : '☐'}</span>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            <div style={{ display: 'flex', gap: 8 }}>
+              <button className="btn" onClick={prev}>← Geri</button>
+              <button className="btn btn-primary" onClick={next}>Devam → Handle</button>
+            </div>
+          </div>
+        )}
+
+        {/* ═══ STEP 8: Handle ═══ */}
+        {step === 8 && (
           <div className="card">
             <div className="card-title">🔗 URL Handle</div>
             <div className="form-group" style={{ marginBottom: 16 }}>
@@ -709,20 +1033,21 @@ export default function ProductImport({ addToast }: Props) {
           </div>
         )}
 
-        {/* ═══ STEP 8: Final Review ═══ */}
-        {step === 8 && product && (
+        {/* ═══ STEP 9: Final Review ═══ */}
+        {step === 9 && product && (
           <div className="card">
             <div className="card-title">✅ Son Kontrol</div>
 
             <div style={{ display: 'grid', gap: 10, marginBottom: 20 }}>
               {[
-                { label: '📝 Başlık', value: enrichedTitle || product.title, step: 7 },
+                { label: '📝 Başlık', value: enrichedTitle || product.title, step: 6 },
                 { label: '🖼️ Görseller', value: `${selectedImages.length} adet`, step: 2 },
                 { label: '🎨 Varyantlar', value: useVariants ? `${variants.length} varyant × ${sizes.join(',')}` : `${sizes.join(', ')}`, step: 3 },
                 { label: '💰 Fiyat', value: `₺${sellingPrice} (karş: ₺${comparePrice})`, step: 4 },
                 { label: '🏷️ Etiketler', value: tags || '(boş)', step: 5 },
-                { label: '🔗 Handle', value: handle, step: 6 },
-                { label: '🤖 Enrichment', value: enrichment ? '✅ Yapıldı' : '⚠️ Yapılmadı', step: 7 },
+                { label: '🤖 Enrichment', value: enrichment ? '✅ Yapıldı' : '⚠️ Yapılmadı', step: 6 },
+                { label: '👗 VTON', value: vtonResults.length > 0 ? `${vtonResults.filter((r) => r.selected).length}/${vtonResults.length} görsel seçili` : 'Yapılmadı', step: 7 },
+                { label: '🔗 Handle', value: handle, step: 8 },
               ].map((row) => (
                 <div key={row.label} style={{
                   display: 'flex', justifyContent: 'space-between', alignItems: 'center',
