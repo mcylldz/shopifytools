@@ -52,7 +52,7 @@ export default function ImageResizer({ addToast }: Props) {
     if (!productUrl) return
     setLoading(true)
     try {
-      const res = await fetch('/api/fetch-product', {
+      const res = await fetch('/api/scrape-product', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ url: productUrl }),
