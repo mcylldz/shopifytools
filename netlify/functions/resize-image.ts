@@ -58,9 +58,10 @@ export const handler = async (event: any) => {
       generationConfig: {
         responseModalities: ['TEXT', 'IMAGE'],
         temperature: 0.4,
-        aspectRatio,
       },
     })
+
+    console.log(`[resize] Model: ${model}, AspectRatio: ${aspectRatio}, Payload size: ${Buffer.byteLength(payload)}`)
 
     const path = `/v1beta/models/${model}:generateContent?key=${GEMINI_KEY}`
     const result = await httpsRequest({
@@ -71,8 +72,16 @@ export const handler = async (event: any) => {
     }, payload)
 
     if (result.status !== 200) {
-      console.error(`[resize] Gemini error: ${result.body.substring(0, 300)}`)
-      throw new Error(`Gemini API error (${result.status})`)
+      console.error(`[resize] Gemini error (${result.status}): ${result.body.substring(0, 500)}`)
+      // Parse error for user-friendly message
+      try {
+        const errParsed = JSON.parse(result.body)
+        const errMsg = errParsed?.error?.message || result.body.substring(0, 200)
+        throw new Error(`Gemini: ${errMsg}`)
+      } catch (e: any) {
+        if (e.message.startsWith('Gemini:')) throw e
+        throw new Error(`Gemini API error (${result.status})`)
+      }
     }
 
     const parsed = JSON.parse(result.body)

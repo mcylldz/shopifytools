@@ -70,7 +70,7 @@ export default function ImageResizer({ addToast }: Props) {
     } finally { setLoading(false) }
   }
 
-  // ── Resize all selected ──
+  // ── Resize all selected (parallel) ──
   const startResize = async () => {
     const selected = images.filter((_, i) => selectedImages.has(i))
     if (selected.length === 0) { addToast({ type: 'error', message: 'En az 1 görsel seçin' }); return }
@@ -81,16 +81,13 @@ export default function ImageResizer({ addToast }: Props) {
       originalUrl: url,
       resultUrl: '',
       aspectRatio: targetRatio,
-      status: 'pending' as const,
-      progress: 'Bekliyor...',
+      status: 'processing' as const,
+      progress: '🔄 İşleniyor...',
     }))
     setResults(newResults)
 
-    // Process sequentially
-    for (let i = 0; i < newResults.length; i++) {
-      const r = newResults[i]
-      setResults(prev => prev.map(p => p.id === r.id ? { ...p, status: 'processing', progress: `🔄 ${i + 1}/${newResults.length} işleniyor...` } : p))
-
+    // Process all in parallel
+    await Promise.all(newResults.map(async (r) => {
       try {
         const res = await fetch('/api/resize-image', {
           method: 'POST',
@@ -109,9 +106,9 @@ export default function ImageResizer({ addToast }: Props) {
       } catch (err: any) {
         setResults(prev => prev.map(p => p.id === r.id ? { ...p, status: 'error', progress: '❌ Hata', error: err.message } : p))
       }
-    }
+    }))
     setProcessing(false)
-    addToast({ type: 'success', message: `${newResults.length} görsel resize edildi` })
+    addToast({ type: 'success', message: 'Resize tamamlandı' })
   }
 
   // ── Push to Shopify ──
