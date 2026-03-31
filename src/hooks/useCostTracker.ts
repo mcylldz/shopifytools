@@ -2,19 +2,19 @@ import { useState, useCallback } from 'react'
 
 // ── Model fiyatları (USD per 1M tokens veya per operation) ──
 const PRICING: Record<string, { input: number; output: number; unit: 'token' } | { perOp: number; unit: 'op' }> = {
-  // Claude — per 1M tokens
+  // Claude — per 1M tokens (verified Mar 2026)
   'claude-sonnet-4-20250514': { input: 3, output: 15, unit: 'token' },
   'claude-3-5-sonnet-20241022': { input: 3, output: 15, unit: 'token' },
   'claude-3-haiku-20240307': { input: 0.25, output: 1.25, unit: 'token' },
 
-  // Gemini — per 1M tokens (approx)
-  'gemini-2.5-flash-image': { input: 0.15, output: 0.60, unit: 'token' },
-  'gemini-3-pro-image-preview': { input: 1.25, output: 5, unit: 'token' },
+  // Gemini — per 1M tokens (verified Mar 2026)
+  'gemini-2.5-flash-image': { input: 0.30, output: 2.50, unit: 'token' },
+  'gemini-3-pro-image-preview': { input: 1.25, output: 12, unit: 'token' },
 
-  // FAL — per generation (approx)
-  'fal:nano-banana-2': { perOp: 0.04, unit: 'op' },
-  'fal:nano-banana-pro': { perOp: 0.08, unit: 'op' },
-  'fal:nano-banana': { perOp: 0.03, unit: 'op' },
+  // FAL — per generation (verified Mar 2026)
+  'fal:nano-banana-2': { perOp: 0.039, unit: 'op' },
+  'fal:nano-banana-pro': { perOp: 0.15, unit: 'op' },
+  'fal:nano-banana': { perOp: 0.039, unit: 'op' },
 }
 
 export interface CostEntry {
