@@ -1,11 +1,6 @@
 import type { Handler } from '@netlify/functions'
-import { fal } from '@fal-ai/client'
 
 const FAL_KEY = process.env.FAL_KEY || ''
-const FAL_MODEL = 'fal-ai/nano-banana-2/edit'
-
-// Configure FAL client
-fal.config({ credentials: FAL_KEY })
 
 // ──────────────── Prompt Templates ────────────────
 
@@ -42,6 +37,25 @@ Lighting should be neutral and evenly distributed to highlight the weave pattern
 Output should look like a premium e-commerce textile macro: realistic micro-folds, natural volume, full-frame sharpness, neutral lighting, and trustworthy material representation.`,
 }
 
+// ──────────────── Helper: FAL'a fetch ────────────────
+async function falFetch(url: string, options: RequestInit = {}) {
+  const res = await fetch(url, {
+    ...options,
+    headers: {
+      'Authorization': `Key ${FAL_KEY}`,
+      'Content-Type': 'application/json',
+      ...(options.headers || {}),
+    },
+  })
+  const text = await res.text()
+  console.log(`[FAL] ${options.method || 'GET'} ${url} → ${res.status} | ${text.substring(0, 500)}`)
+  try {
+    return { ok: res.ok, status: res.status, data: JSON.parse(text) }
+  } catch {
+    return { ok: res.ok, status: res.status, data: { raw: text } }
+  }
+}
+
 export const handler: Handler = async (event) => {
   if (event.httpMethod !== 'POST') {
     return { statusCode: 405, body: JSON.stringify({ error: 'Method not allowed' }) }
@@ -53,95 +67,82 @@ export const handler: Handler = async (event) => {
 
   try {
     const body = JSON.parse(event.body || '{}')
-    const { action, requestId } = body
+    const { action, requestId, statusUrl, responseUrl } = body
 
-    // ══════════════════════════════════════════════
-    // ACTION: STATUS — Check request status via SDK
-    // ══════════════════════════════════════════════
+    // ══════════════════════════════════════════════════════
+    //  STATUS CHECK — FAL'ın verdiği URL'leri birebir kullan
+    // ══════════════════════════════════════════════════════
     if (action === 'status' && requestId) {
-      console.log(`[vton] Checking status via SDK: ${requestId}`)
+      console.log(`[FAL] === STATUS CHECK === requestId: ${requestId}`)
 
-      try {
-        // Önce status kontrol et
-        const status = await fal.queue.status(FAL_MODEL, {
-          requestId,
-          logs: true,
-        })
+      // 1) Status kontrol
+      const sUrl = statusUrl || `https://queue.fal.run/fal-ai/nano-banana-2/edit/requests/${requestId}/status`
+      const statusResult = await falFetch(sUrl)
 
-        console.log(`[vton] SDK status: ${JSON.stringify(status).substring(0, 300)}`)
-
-        if (status.status === 'COMPLETED') {
-          console.log(`[vton] COMPLETED — fetching result via SDK...`)
-
-          // Result'ı al
-          const result = await fal.queue.result(FAL_MODEL, { requestId })
-          console.log(`[vton] SDK result keys: ${Object.keys(result?.data || {}).join(', ')}`)
-
-          const data = result?.data as any
-          const images = data?.images || []
-          console.log(`[vton] Images found: ${images.length}`)
-
-          if (images.length > 0) {
-            console.log(`[vton] Image URL: ${images[0]?.url?.substring(0, 80)}`)
-          }
-
-          return {
-            statusCode: 200,
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              success: true,
-              status: 'COMPLETED',
-              images: images,
-            }),
-          }
-        }
-
-        // Henüz bitmedi
+      if (!statusResult.ok) {
+        // Status endpoint hata → debug bilgisi dön
         return {
           statusCode: 200,
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             success: true,
-            status: status.status || 'IN_PROGRESS',
-            queuePosition: (status as any).queue_position,
+            status: 'IN_PROGRESS',
+            debug: { statusEndpoint: sUrl, httpStatus: statusResult.status, response: statusResult.data },
           }),
         }
-      } catch (statusErr: any) {
-        console.error(`[vton] SDK status error: ${statusErr.message}`)
+      }
 
-        // Status hatası — belki direkt result dene
-        try {
-          const result = await fal.queue.result(FAL_MODEL, { requestId })
-          const data = result?.data as any
-          const images = data?.images || []
+      const falStatus = statusResult.data?.status
+      console.log(`[FAL] Status: ${falStatus}`)
 
-          if (images.length > 0) {
-            console.log(`[vton] Fallback result worked! Images: ${images.length}`)
-            return {
-              statusCode: 200,
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({
-                success: true,
-                status: 'COMPLETED',
-                images: images,
-              }),
-            }
-          }
-        } catch (resultErr: any) {
-          console.log(`[vton] Fallback result also failed: ${resultErr.message}`)
-        }
-
+      // Henüz bitmedi
+      if (falStatus !== 'COMPLETED') {
         return {
           statusCode: 200,
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ success: true, status: 'IN_PROGRESS' }),
+          body: JSON.stringify({
+            success: true,
+            status: falStatus || 'IN_PROGRESS',
+            debug: { statusData: statusResult.data },
+          }),
         }
+      }
+
+      // 2) COMPLETED → Sonucu al
+      const rUrl = responseUrl || `https://queue.fal.run/fal-ai/nano-banana-2/edit/requests/${requestId}/response`
+      console.log(`[FAL] COMPLETED! Fetching result from: ${rUrl}`)
+      const resultResult = await falFetch(rUrl)
+
+      if (!resultResult.ok) {
+        return {
+          statusCode: 200,
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            success: true,
+            status: 'COMPLETED',
+            images: [],
+            debug: { responseEndpoint: rUrl, httpStatus: resultResult.status, response: resultResult.data },
+          }),
+        }
+      }
+
+      const images = resultResult.data?.images || []
+      console.log(`[FAL] Got ${images.length} images`)
+
+      return {
+        statusCode: 200,
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          success: true,
+          status: 'COMPLETED',
+          images,
+        }),
       }
     }
 
-    // ══════════════════════════════════════════════
-    // ACTION: SUBMIT — Submit job via SDK
-    // ══════════════════════════════════════════════
+    // ══════════════════════════════════════════════════════
+    //  SUBMIT — Yeni job gönder
+    // ══════════════════════════════════════════════════════
     const { mode, modelDesc, garmentDesc, productTitle, garmentCategory, fabricInfo, imageUrls, resolution, aspectRatio } = body
 
     let prompt: string
@@ -163,10 +164,11 @@ export const handler: Handler = async (event) => {
       throw new Error('En az bir referans görsel URL gerekli')
     }
 
-    console.log(`[vton] Submitting via SDK — mode: ${mode}, images: ${imageUrls.length}`)
+    console.log(`[FAL] === SUBMIT === mode: ${mode}, images: ${imageUrls.length}`)
 
-    const { request_id } = await fal.queue.submit(FAL_MODEL, {
-      input: {
+    const submitResult = await falFetch('https://queue.fal.run/fal-ai/nano-banana-2/edit', {
+      method: 'POST',
+      body: JSON.stringify({
         prompt,
         image_urls: imageUrls,
         resolution: resolution || '2K',
@@ -175,10 +177,33 @@ export const handler: Handler = async (event) => {
         output_format: 'png',
         safety_tolerance: '6',
         limit_generations: true,
-      },
+      }),
     })
 
-    console.log(`[vton] Queued via SDK — request_id: ${request_id}`)
+    if (!submitResult.ok) {
+      throw new Error(`FAL submit failed (${submitResult.status}): ${JSON.stringify(submitResult.data)}`)
+    }
+
+    const rid = submitResult.data.request_id
+    const sUrl = submitResult.data.status_url
+    const rUrl = submitResult.data.response_url
+
+    console.log(`[FAL] Queued: request_id=${rid}`)
+    console.log(`[FAL] status_url=${sUrl}`)
+    console.log(`[FAL] response_url=${rUrl}`)
+
+    // Sync result (bazı modeller hemen döner)
+    if (submitResult.data.images?.length > 0) {
+      return {
+        statusCode: 200,
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          success: true,
+          status: 'COMPLETED',
+          images: submitResult.data.images,
+        }),
+      }
+    }
 
     return {
       statusCode: 200,
@@ -186,11 +211,13 @@ export const handler: Handler = async (event) => {
       body: JSON.stringify({
         success: true,
         status: 'QUEUED',
-        requestId: request_id,
+        requestId: rid,
+        statusUrl: sUrl,
+        responseUrl: rUrl,
       }),
     }
   } catch (err: any) {
-    console.error(`[vton] Error: ${err.message}`)
+    console.error(`[FAL] Error: ${err.message}`)
     return {
       statusCode: 500,
       body: JSON.stringify({ error: err.message }),

@@ -375,7 +375,7 @@ export default function ProductImport({ addToast }: Props) {
     setVtonJobs((prev) => prev.map((j) => j.id === jobId ? { ...j, ...update } : j))
   }
 
-  const pollForResult = async (requestId: string, jobId: string): Promise<string | null> => {
+  const pollForResult = async (requestId: string, jobId: string, statusUrl?: string, responseUrl?: string): Promise<string | null> => {
     const maxWait = 5 * 60 * 1000
     const interval = 5000
     const start = Date.now()
@@ -387,9 +387,11 @@ export default function ProductImport({ addToast }: Props) {
         const res = await fetch('/api/vton-generate', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ action: 'status', requestId }),
+          body: JSON.stringify({ action: 'status', requestId, statusUrl, responseUrl }),
         })
         const data = await res.json()
+        console.log(`[VTON Poll] ${elapsed}s:`, data.status, data.debug ? JSON.stringify(data.debug).substring(0, 200) : '')
+
         if (data.status === 'COMPLETED' && data.images?.length > 0) {
           return data.images[0].url
         }
@@ -447,7 +449,7 @@ export default function ProductImport({ addToast }: Props) {
         resultUrl = genRes.images[0].url
       } else if (genRes.requestId) {
         updateJob(job.id, { status: 'polling', progress: '⏳ Sonuç bekleniyor...', requestId: genRes.requestId })
-        resultUrl = await pollForResult(genRes.requestId, job.id)
+        resultUrl = await pollForResult(genRes.requestId, job.id, genRes.statusUrl, genRes.responseUrl)
       }
 
       if (resultUrl) {
