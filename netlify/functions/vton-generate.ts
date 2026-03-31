@@ -1,11 +1,26 @@
 import type { Handler } from '@netlify/functions'
+import https from 'https'
 
 const FAL_KEY = process.env.FAL_KEY || ''
-const FAL_QUEUE_URL = 'https://queue.fal.run/fal-ai/nano-banana-2/edit'
+const ANTHROPIC_KEY = process.env.ANTHROPIC_API_KEY || ''
+
+function httpsRequest(options: https.RequestOptions, payload?: string): Promise<{ status: number; body: string }> {
+  return new Promise((resolve, reject) => {
+    const req = https.request(options, (res) => {
+      let data = ''
+      res.on('data', (chunk: string) => (data += chunk))
+      res.on('end', () => resolve({ status: res.statusCode || 500, body: data }))
+    })
+    req.on('error', reject)
+    req.setTimeout(25000, () => { req.destroy(); reject(new Error('Request timeout')) })
+    if (payload) req.write(payload)
+    req.end()
+  })
+}
 
 // ──────────────── Prompt Templates ────────────────
 
-export const FINAL_PROMPTS = {
+const PROMPTS = {
   standard: (modelDesc: string, garmentDesc: string, productTitle: string, category: string) =>
     `Professional editorial fashion photography. The exact same model from image 1 wearing a ${garmentDesc}. The model description: ${modelDesc}.
 
@@ -27,120 +42,184 @@ CONTEXT:
     `Professional studio product photography of a ${garmentDesc}. Invisible ghost mannequin effect: The garment is shown worn by an invisible form, creating a realistic 3D shape with natural volume, folds, and drape, as if floating. Details: Show only the clean inside fabric texture through the neck opening. Background: Pure, seamless flat white studio background. Lighting: Soft, even studio lighting to highlight fabric texture. View: Front view, centered. No: No visible mannequin, no hangers, no human models, no neck labels, no brand tags.`,
 
   fabric: (fabricInfo?: string) =>
-    `Generate a high-resolution fabric texture close-up for a Shopify product page. Use the provided product image${fabricInfo ? ` and fabric information (${fabricInfo})` : ''} to recreate the fabric with natural realism.
-
-The fabric surface should include gentle, authentic micro-folds and soft waves — similar to a garment slightly gathered or lightly bunched during a professional studio macro shoot. These waves must be subtle, clean, and consistent with the actual behavior of the material, avoiding dramatic draping.
-
-The entire frame must remain fully sharp: no blur, no depth of field, no soft gradients, edge-to-edge clarity.
-
-Lighting should be neutral and evenly distributed to highlight the weave pattern, fiber detail, and the three-dimensional surface without creating harsh shadows. Color accuracy and fabric structure must stay true to the original product.
-
-Output should look like a premium e-commerce textile macro: realistic micro-folds, natural volume, full-frame sharpness, neutral lighting, and trustworthy material representation.`,
+    `Generate a high-resolution fabric texture close-up for a Shopify product page. Use the provided product image${fabricInfo ? ` and fabric information (${fabricInfo})` : ''} to recreate the fabric with natural realism. The fabric surface should include gentle, authentic micro-folds and soft waves. The entire frame must remain fully sharp: no blur, no depth of field, no soft gradients, edge-to-edge clarity. Lighting should be neutral and evenly distributed to highlight the weave pattern, fiber detail, and the three-dimensional surface. Output should look like a premium e-commerce textile macro.`,
 }
-
-const authHeaders = { 'Authorization': `Key ${FAL_KEY}` }
 
 export const handler: Handler = async (event) => {
   if (event.httpMethod !== 'POST') {
     return { statusCode: 405, body: JSON.stringify({ error: 'Method not allowed' }) }
   }
 
-  if (!FAL_KEY) {
-    return { statusCode: 500, body: JSON.stringify({ error: 'FAL_KEY env variable eksik' }) }
-  }
-
   try {
     const body = JSON.parse(event.body || '{}')
     const { action } = body
 
-    // ═══════════ STATUS CHECK (hafif, <2s) ═══════════
-    if (action === 'status') {
-      const { statusUrl, responseUrl } = body
-      if (!statusUrl) throw new Error('statusUrl gerekli')
+    // ═══════════ FAL SUBMIT ═══════════
+    if (action === 'fal_submit') {
+      if (!FAL_KEY) throw new Error('FAL_KEY eksik')
 
-      const sRes = await fetch(statusUrl, { headers: authHeaders })
-      if (!sRes.ok) {
-        return { statusCode: 200, headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ success: true, status: 'CHECKING', httpStatus: sRes.status }) }
+      const payload = JSON.stringify(body.payload)
+      console.log(`[vton] fal_submit, payload size: ${payload.length}`)
+
+      const result = await httpsRequest({
+        hostname: 'queue.fal.run',
+        path: '/fal-ai/nano-banana-2/edit',
+        method: 'POST',
+        headers: {
+          'Authorization': `Key ${FAL_KEY}`,
+          'Content-Type': 'application/json',
+          'Content-Length': Buffer.byteLength(payload),
+        },
+      }, payload)
+
+      console.log(`[vton] fal_submit response: ${result.status}`)
+      return {
+        statusCode: result.status,
+        headers: { 'Content-Type': 'application/json' },
+        body: result.body,
       }
-
-      const sData = await sRes.json()
-
-      if (sData.status === 'COMPLETED' && responseUrl) {
-        // Sonucu al
-        const rRes = await fetch(responseUrl, { headers: authHeaders })
-        if (rRes.ok) {
-          const result = await rRes.json()
-          return { statusCode: 200, headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ success: true, status: 'COMPLETED', images: result.images || [] }) }
-        }
-      }
-
-      return { statusCode: 200, headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          success: true,
-          status: sData.status || 'IN_PROGRESS',
-          queuePosition: sData.queue_position,
-        }) }
     }
 
-    // ═══════════ SUBMIT (kuyrukla, <3s) ═══════════
-    const { mode, modelDesc, garmentDesc, productTitle, garmentCategory, fabricInfo, imageUrls, resolution, aspectRatio } = body
+    // ═══════════ FAL STATUS / RESULT (GET) ═══════════
+    if (action === 'fal_status') {
+      if (!FAL_KEY) throw new Error('FAL_KEY eksik')
+      if (!body.path) throw new Error('path gerekli')
 
+      console.log(`[vton] fal_status GET: ${body.path}`)
+
+      const result = await httpsRequest({
+        hostname: 'queue.fal.run',
+        path: body.path,
+        method: 'GET',
+        headers: {
+          'Authorization': `Key ${FAL_KEY}`,
+          'Content-Type': 'application/json',
+        },
+      })
+
+      console.log(`[vton] fal_status response: ${result.status}, body: ${result.body.substring(0, 200)}`)
+      return {
+        statusCode: result.status,
+        headers: { 'Content-Type': 'application/json' },
+        body: result.body,
+      }
+    }
+
+    // ═══════════ CLAUDE VISION ANALYZE ═══════════
+    if (action === 'analyze') {
+      if (!ANTHROPIC_KEY) throw new Error('ANTHROPIC_API_KEY eksik')
+
+      const { imageUrl, mode, productTitle, garmentCategory, fabricInfo } = body
+
+      let systemPrompt = ''
+      if (mode === 'model') {
+        systemPrompt = `Describe this fashion model image for an AI image generator. Focus on:
+1. The model's pose, gender, and visible physical traits.
+2. The clothing they are currently wearing (to be replaced).
+3. The lighting, background, and camera angle.
+Output a concise, descriptive prompt.`
+      } else {
+        const fabricHint = fabricInfo ? `\n\nUSER PROVIDED FABRIC INFO: ${fabricInfo}` : ''
+        systemPrompt = `Act as a technical fashion designer. Analyze this garment image to create a high-fidelity prompt description for an AI image generator.
+Focus STRICTLY on: Garment Type & Fit, Fabric & Texture, Neckline & Sleeves, Design Details, Color.${fabricHint}
+${mode === 'ghost' ? '\nIGNORE the human model, skin, hair, face, and hands. IGNORE the background.' : ''}
+Product: ${productTitle || 'Fashion garment'}, Category: ${garmentCategory || 'top'}
+OUTPUT ONLY a concise, comma-separated descriptive string.`
+      }
+
+      const payload = JSON.stringify({
+        model: 'claude-sonnet-4-20250514',
+        max_tokens: 500,
+        messages: [{
+          role: 'user',
+          content: [
+            { type: 'text', text: systemPrompt },
+            { type: 'image', source: { type: 'url', url: imageUrl } },
+          ],
+        }],
+      })
+
+      const result = await httpsRequest({
+        hostname: 'api.anthropic.com',
+        path: '/v1/messages',
+        method: 'POST',
+        headers: {
+          'x-api-key': ANTHROPIC_KEY,
+          'anthropic-version': '2023-06-01',
+          'Content-Type': 'application/json',
+          'Content-Length': Buffer.byteLength(payload),
+        },
+      }, payload)
+
+      if (result.status !== 200) {
+        console.error(`[vton] Claude error: ${result.body.substring(0, 300)}`)
+        throw new Error(`Claude API error (${result.status})`)
+      }
+
+      const data = JSON.parse(result.body)
+      const description = data.content?.[0]?.text || ''
+
+      return {
+        statusCode: 200,
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ success: true, description }),
+      }
+    }
+
+    // ═══════════ GENERATE (eski uyumluluk) ═══════════
+    const { mode, modelDesc, garmentDesc, productTitle, garmentCategory, fabricInfo, imageUrls } = body
     let prompt: string
+
     switch (mode) {
       case 'standard':
-        prompt = FINAL_PROMPTS.standard(modelDesc || 'Fashion model', garmentDesc || 'Fashion garment', productTitle || '', garmentCategory || 'top')
+        prompt = PROMPTS.standard(modelDesc || '', garmentDesc || '', productTitle || '', garmentCategory || 'top')
         break
       case 'ghost':
-        prompt = FINAL_PROMPTS.ghost(garmentDesc || 'Fashion garment')
+        prompt = PROMPTS.ghost(garmentDesc || '')
         break
       case 'fabric':
-        prompt = FINAL_PROMPTS.fabric(fabricInfo)
+        prompt = PROMPTS.fabric(fabricInfo)
         break
       default:
         throw new Error(`Geçersiz mod: ${mode}`)
     }
 
-    if (!imageUrls || imageUrls.length === 0) throw new Error('En az bir referans görsel URL gerekli')
+    if (!imageUrls?.length) throw new Error('Görsel URL gerekli')
 
-    console.log(`[vton] Queue submit — mode: ${mode}, images: ${imageUrls.length}`)
-
-    const submitRes = await fetch(FAL_QUEUE_URL, {
-      method: 'POST',
-      headers: { ...authHeaders, 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        prompt,
-        image_urls: imageUrls,
-        resolution: resolution || '2K',
-        aspect_ratio: aspectRatio || '9:16',
-        num_images: 1,
-        output_format: 'png',
-        safety_tolerance: '6',
-        limit_generations: true,
-      }),
+    const payload = JSON.stringify({
+      prompt,
+      image_urls: imageUrls,
+      resolution: '2K',
+      aspect_ratio: '9:16',
+      num_images: 1,
+      output_format: 'png',
+      safety_tolerance: '6',
     })
 
-    if (!submitRes.ok) {
-      const errText = await submitRes.text()
-      throw new Error(`FAL submit failed (${submitRes.status}): ${errText.substring(0, 200)}`)
-    }
+    const result = await httpsRequest({
+      hostname: 'queue.fal.run',
+      path: '/fal-ai/nano-banana-2/edit',
+      method: 'POST',
+      headers: {
+        'Authorization': `Key ${FAL_KEY}`,
+        'Content-Type': 'application/json',
+        'Content-Length': Buffer.byteLength(payload),
+      },
+    }, payload)
 
-    const submitData = await submitRes.json()
-    console.log(`[vton] Queued: id=${submitData.request_id}, pos=${submitData.queue_position}`)
-    console.log(`[vton] status_url=${submitData.status_url}`)
-    console.log(`[vton] response_url=${submitData.response_url}`)
+    if (result.status >= 400) throw new Error(`FAL error (${result.status}): ${result.body.substring(0, 200)}`)
 
+    const data = JSON.parse(result.body)
     return {
       statusCode: 200,
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         success: true,
         status: 'QUEUED',
-        requestId: submitData.request_id,
-        statusUrl: submitData.status_url,
-        responseUrl: submitData.response_url,
-        queuePosition: submitData.queue_position,
+        requestId: data.request_id,
+        statusUrl: data.status_url,
+        responseUrl: data.response_url,
+        queuePosition: data.queue_position,
       }),
     }
   } catch (err: any) {

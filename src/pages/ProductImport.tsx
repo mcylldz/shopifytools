@@ -1300,17 +1300,42 @@ export default function ProductImport({ addToast }: Props) {
               ))}
             </div>
 
-            {pushResult ? (
-              <div style={{ background: 'var(--bg-card)', borderRadius: 8, padding: 16, textAlign: 'center' }}>
-                <div style={{ fontSize: 40, marginBottom: 8 }}>🎉</div>
-                <div style={{ fontSize: 16, fontWeight: 700 }}>Ürün Oluşturuldu!</div>
-                <div style={{ fontSize: 13, color: 'var(--text-muted)' }}>{pushResult.title} — {pushResult.status}</div>
-                <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 4 }}>ID: {pushResult.id}</div>
-                <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 8 }}>
-                  💡 Meta ve Google sync için AI Enrichment sayfasını kullanın
+            {pushResult && (() => {
+              const numericId = pushResult.id?.replace(/.*\//, '') || ''
+              const adminUrl = `https://admin.shopify.com/store/sveltechic/products/${numericId}`
+              const shopUrl = `https://sveltechic.com/products/${pushResult.handle}`
+              return (
+                <div style={{ background: 'var(--bg-card)', borderRadius: 8, padding: 16, textAlign: 'center' }}>
+                  <div style={{ fontSize: 40, marginBottom: 8 }}>🎉</div>
+                  <div style={{ fontSize: 16, fontWeight: 700 }}>Ürün Oluşturuldu!</div>
+                  <div style={{ fontSize: 13, color: 'var(--text-muted)' }}>{pushResult.title} — {pushResult.status}</div>
+
+                  <div style={{ marginTop: 12, display: 'flex', flexDirection: 'column', gap: 6 }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 6, background: 'var(--bg)', borderRadius: 6, padding: '8px 12px' }}>
+                      <span style={{ fontSize: 11, color: 'var(--text-muted)', whiteSpace: 'nowrap' }}>Admin:</span>
+                      <input className="form-input" readOnly value={adminUrl}
+                        style={{ flex: 1, fontSize: 11, padding: '4px 8px', cursor: 'text' }}
+                        onClick={(e) => (e.target as HTMLInputElement).select()} />
+                      <button className="btn btn-sm" onClick={() => { navigator.clipboard.writeText(adminUrl); addToast({ type: 'success', message: 'Admin URL kopyalandı!' }) }}
+                        style={{ padding: '4px 10px', fontSize: 11 }}>📋</button>
+                      <a href={adminUrl} target="_blank" rel="noopener" className="btn btn-sm"
+                        style={{ padding: '4px 10px', fontSize: 11, textDecoration: 'none' }}>↗</a>
+                    </div>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 6, background: 'var(--bg)', borderRadius: 6, padding: '8px 12px' }}>
+                      <span style={{ fontSize: 11, color: 'var(--text-muted)', whiteSpace: 'nowrap' }}>Mağaza:</span>
+                      <input className="form-input" readOnly value={shopUrl}
+                        style={{ flex: 1, fontSize: 11, padding: '4px 8px', cursor: 'text' }}
+                        onClick={(e) => (e.target as HTMLInputElement).select()} />
+                      <button className="btn btn-sm" onClick={() => { navigator.clipboard.writeText(shopUrl); addToast({ type: 'success', message: 'Mağaza URL kopyalandı!' }) }}
+                        style={{ padding: '4px 10px', fontSize: 11 }}>📋</button>
+                      <a href={shopUrl} target="_blank" rel="noopener" className="btn btn-sm"
+                        style={{ padding: '4px 10px', fontSize: 11, textDecoration: 'none' }}>↗</a>
+                    </div>
+                  </div>
                 </div>
-              </div>
-            ) : (
+              )
+            })()}
+            {!pushResult && (
               <div style={{ display: 'flex', gap: 8 }}>
                 <button className="btn" onClick={prev}>← Geri</button>
                 <button className="btn btn-primary" onClick={handlePush} disabled={pushing}
