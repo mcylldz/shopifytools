@@ -232,13 +232,14 @@ export const handler: Handler = async (event) => {
 
     // ── Repair (paginated): her çağrıda 1 sayfa (250 ürün) tara ──
     if (action === 'repair') {
-      const { percentage, cutoffTime, updatePrice, updateCompare, pageUrl } = body
+      const { percentage, cutoffTime, updatePrice, updateCompare, pageUrl, productStatus } = body
       const pct = parseFloat(percentage) / 100
       const cutoff = new Date(cutoffTime).getTime()
       const token = await getAccessToken()
 
       // İlk sayfa veya devam URL'i
-      const url = pageUrl || `https://${SHOPIFY_DOMAIN}/admin/api/2025-01/products.json?limit=250&fields=id,title,status,tags,variants`
+      const statusParam = productStatus && productStatus !== 'any' ? `&status=${productStatus}` : ''
+      const url = pageUrl || `https://${SHOPIFY_DOMAIN}/admin/api/2025-01/products.json?limit=250&fields=id,title,status,tags,variants${statusParam}`
 
       console.log(`[repair] Fetching page: ${url.substring(0, 80)}...`)
 

@@ -41,6 +41,7 @@ export default function PriceUpdate({ addToast }: Props) {
   const [repairResult, setRepairResult] = useState<any>(null)
   const [repairApplying, setRepairApplying] = useState(false)
   const [repairDone, setRepairDone] = useState<any>(null)
+  const [repairStatus, setRepairStatus] = useState('active')
 
   const [collections, setCollections] = useState<Collection[]>([])
   const [selectedCollection, setSelectedCollection] = useState('')
@@ -519,6 +520,15 @@ export default function PriceUpdate({ addToast }: Props) {
                   Bu süre içinde güncellenen varyantlar atlanır
                 </div>
               </div>
+              <div className="form-group" style={{ flex: 1, minWidth: 120 }}>
+                <label className="form-label">Ürün durumu</label>
+                <select className="form-input" value={repairStatus} onChange={e => setRepairStatus(e.target.value)}>
+                  <option value="active">Aktif</option>
+                  <option value="draft">Taslak</option>
+                  <option value="archived">Arşiv</option>
+                  <option value="any">Tümü</option>
+                </select>
+              </div>
             </div>
 
             {/* Scan Button */}
@@ -537,7 +547,7 @@ export default function PriceUpdate({ addToast }: Props) {
                     pageNum++
                     const res: Response = await fetch('/api/update-prices', {
                       method: 'POST', headers: { 'Content-Type': 'application/json' },
-                      body: JSON.stringify({ action: 'repair', percentage: repairPct, cutoffTime: cutoff, pageUrl: nextPageUrl }),
+                      body: JSON.stringify({ action: 'repair', percentage: repairPct, cutoffTime: cutoff, pageUrl: nextPageUrl, productStatus: repairStatus }),
                     })
                     const data: any = await res.json()
                     if (!data.success) throw new Error(data.error)
