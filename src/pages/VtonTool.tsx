@@ -35,8 +35,8 @@ const AI_PROVIDERS = [
   { value: 'fal:nano-banana-2', label: '🟢 FAL — Nano Banana 2' },
   { value: 'fal:nano-banana-pro', label: '🟢 FAL — Nano Banana Pro' },
   { value: 'fal:nano-banana', label: '🟢 FAL — Nano Banana (Original)' },
-  { value: 'gemini:gemini-2.0-flash-exp', label: '🔵 Gemini 2.0 Flash' },
-  { value: 'gemini:gemini-2.5-flash-preview-05-20', label: '🔵 Gemini 2.5 Flash' },
+  { value: 'gemini:gemini-2.5-flash-image', label: '🔵 Gemini 2.5 Flash Image' },
+  { value: 'gemini:gemini-3-pro-image-preview', label: '🔵 Gemini 3 Pro Image' },
 ]
 
 export default function VtonTool({ addToast }: Props) {
