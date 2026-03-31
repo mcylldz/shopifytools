@@ -140,27 +140,52 @@ export const handler: Handler = async (event) => {
         throw new Error(`Gemini API error (${result.status}): ${result.body.substring(0, 200)}`)
       }
 
-      // Parse response — Gemini returns images as inline_data base64
+      // Parse response — Gemini returns images as inline_data or inlineData
       const geminiData = JSON.parse(result.body)
       const candidates = geminiData.candidates || []
       const responseParts = candidates[0]?.content?.parts || []
 
-      // Find image part
-      const imagePart = responseParts.find((p: any) => p.inline_data)
-      if (!imagePart) {
-        const textPart = responseParts.find((p: any) => p.text)
-        throw new Error(`Gemini görsel üretemedi: ${textPart?.text || 'Yanıt yok'}`)
+      console.log(`[vton] Gemini parts count: ${responseParts.length}`)
+      for (let i = 0; i < responseParts.length; i++) {
+        const keys = Object.keys(responseParts[i])
+        console.log(`[vton] Part ${i} keys: ${keys.join(', ')}`)
       }
 
-      return {
-        statusCode: 200,
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          success: true,
-          imageBase64: imagePart.inline_data.data,
-          mimeType: imagePart.inline_data.mime_type || 'image/png',
-        }),
+      // Find image part — check both camelCase and snake_case
+      const imagePart = responseParts.find((p: any) => p.inline_data || p.inlineData)
+      if (imagePart) {
+        const imgData = imagePart.inline_data || imagePart.inlineData
+        return {
+          statusCode: 200,
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            success: true,
+            imageBase64: imgData.data,
+            mimeType: imgData.mime_type || imgData.mimeType || 'image/png',
+          }),
+        }
       }
+
+      // Maybe file_data or fileData format
+      const filePart = responseParts.find((p: any) => p.file_data || p.fileData)
+      if (filePart) {
+        const fd = filePart.file_data || filePart.fileData
+        return {
+          statusCode: 200,
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            success: true,
+            fileUri: fd.file_uri || fd.fileUri,
+            mimeType: fd.mime_type || fd.mimeType || 'image/png',
+          }),
+        }
+      }
+
+      // No image found
+      const textPart = responseParts.find((p: any) => p.text)
+      const fullBody = JSON.stringify(responseParts).substring(0, 500)
+      console.error(`[vton] Gemini no image found. Parts dump: ${fullBody}`)
+      throw new Error(`Gemini görsel üretemedi. Text: ${textPart?.text?.substring(0, 100) || 'yok'}. Raw: ${fullBody}`)
     }
 
     // ═══════════ CLAUDE VISION ANALYZE ═══════════
