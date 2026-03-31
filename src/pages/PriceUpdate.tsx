@@ -33,6 +33,15 @@ export default function PriceUpdate({ addToast }: Props) {
   const [updateCompare, setUpdateCompare] = useState(true)
   const [productStatus, setProductStatus] = useState('any')
 
+  // Repair
+  const [showRepair, setShowRepair] = useState(false)
+  const [repairPct, setRepairPct] = useState('-15')
+  const [repairCutoffHours, setRepairCutoffHours] = useState('2')
+  const [repairScanning, setRepairScanning] = useState(false)
+  const [repairResult, setRepairResult] = useState<any>(null)
+  const [repairApplying, setRepairApplying] = useState(false)
+  const [repairDone, setRepairDone] = useState<any>(null)
+
   const [collections, setCollections] = useState<Collection[]>([])
   const [selectedCollection, setSelectedCollection] = useState('')
   const [tag, setTag] = useState('')
@@ -473,6 +482,145 @@ export default function PriceUpdate({ addToast }: Props) {
                 </div>
               )}
             </div>
+          </div>
+        )}
+      </div>
+
+      {/* ═══ REPAIR PANEL ═══ */}
+      <div className="page-body" style={{ marginTop: 0 }}>
+        <div style={{ marginBottom: 12, textAlign: 'right' }}>
+          <button className="btn" onClick={() => setShowRepair(!showRepair)}
+            style={{ fontSize: 11, padding: '6px 14px', background: showRepair ? '#dc2626' : 'var(--bg-card)', color: showRepair ? '#fff' : '#dc2626', border: '1px solid #dc2626' }}>
+            🔧 {showRepair ? 'Onarımı Gizle' : 'Fiyat Onarım Aracı'}
+          </button>
+        </div>
+
+        {showRepair && (
+          <div className="card" style={{ border: '2px solid #dc2626', background: 'rgba(220,38,38,0.03)' }}>
+            <div className="card-title" style={{ fontSize: 15, color: '#dc2626' }}>
+              🔧 Acil Fiyat Onarımı — Yarım Kalan Güncellemeyi Tamamla
+            </div>
+            <p style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 16 }}>
+              Shopify varyant <code>updated_at</code> damgasına bakarak hangi varyantların güncellenmediğini tespit eder ve
+              sadece onlara yüzde uygular. Zaten güncellenen varyantlara dokunmaz.
+            </p>
+
+            <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', marginBottom: 16 }}>
+              <div className="form-group" style={{ flex: 1, minWidth: 120 }}>
+                <label className="form-label">Yüzde (%)</label>
+                <input className="form-input" type="number" value={repairPct} onChange={e => setRepairPct(e.target.value)}
+                  style={{ fontSize: 16, fontWeight: 700, textAlign: 'center' }} />
+              </div>
+              <div className="form-group" style={{ flex: 1, minWidth: 120 }}>
+                <label className="form-label">Kaç saat öncesinden itibaren?</label>
+                <input className="form-input" type="number" value={repairCutoffHours} onChange={e => setRepairCutoffHours(e.target.value)}
+                  style={{ fontSize: 16, fontWeight: 700, textAlign: 'center' }} />
+                <div style={{ fontSize: 10, color: 'var(--text-muted)', marginTop: 2 }}>
+                  Bu süre içinde güncellenen varyantlar atlanır
+                </div>
+              </div>
+            </div>
+
+            {/* Scan Button */}
+            <button className="btn" disabled={repairScanning}
+              onClick={async () => {
+                setRepairScanning(true); setRepairResult(null); setRepairDone(null)
+                try {
+                  const cutoff = new Date(Date.now() - parseFloat(repairCutoffHours) * 3600000).toISOString()
+                  const res = await fetch('/api/update-prices', {
+                    method: 'POST', headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ action: 'repair', percentage: repairPct, cutoffTime: cutoff, dryRun: true }),
+                  })
+                  const data = await res.json()
+                  if (!data.success) throw new Error(data.error)
+                  setRepairResult(data)
+                  addToast({ type: 'info', message: `Tarama tamamlandı: ${data.needsUpdate} varyant güncellenmemiş` })
+                } catch (err: any) { addToast({ type: 'error', message: err.message }) }
+                finally { setRepairScanning(false) }
+              }}
+              style={{ width: '100%', fontSize: 14, padding: '12px 20px', background: '#f59e0b', color: '#fff', fontWeight: 700, marginBottom: 12 }}>
+              {repairScanning ? <><span className="spinner" /> Taranıyor...</> : '🔍 Tara — Güncellenmeyen Varyantları Bul'}
+            </button>
+
+            {/* Scan Results */}
+            {repairResult && (
+              <div style={{ padding: 12, borderRadius: 8, background: 'var(--bg)', border: '1px solid var(--border)', marginBottom: 12 }}>
+                <div style={{ display: 'flex', gap: 20, fontSize: 14, marginBottom: 8 }}>
+                  <div>
+                    <span style={{ color: '#dc2626', fontWeight: 700, fontSize: 20 }}>{repairResult.needsUpdate}</span>
+                    <span style={{ color: 'var(--text-muted)', marginLeft: 4 }}>güncellenmemiş</span>
+                  </div>
+                  <div>
+                    <span style={{ color: '#16a34a', fontWeight: 700, fontSize: 20 }}>{repairResult.alreadyUpdated}</span>
+                    <span style={{ color: 'var(--text-muted)', marginLeft: 4 }}>zaten güncellendi</span>
+                  </div>
+                  <div>
+                    <span style={{ fontWeight: 700, fontSize: 20 }}>{repairResult.total}</span>
+                    <span style={{ color: 'var(--text-muted)', marginLeft: 4 }}>toplam</span>
+                  </div>
+                </div>
+
+                {repairResult.samples?.length > 0 && (
+                  <div style={{ fontSize: 11, marginBottom: 8 }}>
+                    <div style={{ fontWeight: 600, marginBottom: 4 }}>Örnekler (ilk 20):</div>
+                    <div style={{ maxHeight: 150, overflowY: 'auto' }}>
+                      {repairResult.samples.map((s: any, i: number) => (
+                        <div key={i} style={{ display: 'flex', justifyContent: 'space-between', padding: '2px 6px', borderBottom: '1px solid var(--border)' }}>
+                          <span>{s.product}</span>
+                          <span>₺{s.oldPrice} → <strong style={{ color: '#dc2626' }}>₺{s.newPrice}</strong></span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {repairResult.needsUpdate > 0 && !repairDone && (
+                  <button className="btn" disabled={repairApplying}
+                    onClick={async () => {
+                      if (!repairResult.updates?.length) { addToast({ type: 'error', message: 'Güncelleme verisi bulunamadı' }); return }
+                      setRepairApplying(true)
+                      const allUpdates = repairResult.updates
+                      let totalDone = 0, totalFailed = 0
+
+                      for (let i = 0; i < allUpdates.length; i += BATCH_SIZE) {
+                        const batch = allUpdates.slice(i, i + BATCH_SIZE)
+                        try {
+                          const res = await fetch('/api/update-prices', {
+                            method: 'POST', headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ action: 'apply', updates: batch }),
+                          })
+                          const data = await res.json()
+                          if (data.success) { totalDone += data.updated; totalFailed += data.failed }
+                          else totalFailed += batch.length
+                        } catch { totalFailed += batch.length }
+                        // Update progress in button text
+                        setRepairDone({ updated: totalDone, failed: totalFailed, alreadyUpdated: repairResult.alreadyUpdated, inProgress: true })
+                      }
+
+                      setRepairDone({ updated: totalDone, failed: totalFailed, alreadyUpdated: repairResult.alreadyUpdated, inProgress: false })
+                      setRepairApplying(false)
+                      addToast({ type: totalFailed === 0 ? 'success' : 'error', message: `Onarım: ${totalDone} güncellendi${totalFailed > 0 ? `, ${totalFailed} başarısız` : ''}` })
+                    }}
+                    style={{ width: '100%', fontSize: 14, padding: '14px 20px', background: '#dc2626', color: '#fff', fontWeight: 700 }}>
+                    {repairApplying
+                      ? <><span className="spinner" /> Onarılıyor... {repairDone ? `${repairDone.updated}/${repairResult.needsUpdate}` : ''}</>
+                      : `🚀 ${repairResult.needsUpdate} Varyantı Onar (%${repairPct})`}
+                  </button>
+                )}
+              </div>
+            )}
+
+            {/* Repair Done */}
+            {repairDone && (
+              <div style={{ padding: 16, borderRadius: 8, background: repairDone.failed === 0 ? '#e8f5e9' : '#fff3e0', textAlign: 'center' }}>
+                <div style={{ fontSize: 28, marginBottom: 4 }}>{repairDone.failed === 0 ? '✅' : '⚠️'}</div>
+                <div style={{ fontSize: 14, fontWeight: 700 }}>
+                  Onarım: {repairDone.updated} güncellendi
+                  {repairDone.failed > 0 && `, ${repairDone.failed} başarısız`}
+                  {' • '}{repairDone.alreadyUpdated} zaten doğruydu
+                </div>
+              </div>
+            )}
           </div>
         )}
       </div>

@@ -85,6 +85,7 @@ async function getAllProducts(tag?: string, onSale?: boolean, status?: string): 
           title: v.title || 'Default',
           price: v.price,
           compare_at_price: v.compare_at_price,
+          updated_at: v.updated_at || p.updated_at || '',
         })),
       })
     }
@@ -226,6 +227,68 @@ export const handler: Handler = async (event) => {
         statusCode: 200,
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ success: true, updated: success, failed: fail }),
+      }
+    }
+
+    // ── Repair: güncellenmeyen varyantları tespit et ve güncelle ──
+    if (action === 'repair') {
+      const { percentage, cutoffTime, updatePrice, updateCompare, dryRun } = body
+      const pct = parseFloat(percentage) / 100
+      const cutoff = new Date(cutoffTime).getTime()
+
+      console.log(`[repair] Scanning all products, cutoff: ${cutoffTime}, pct: ${percentage}%`)
+
+      // Tüm ürünleri çek
+      const allProducts = await getAllProducts()
+      let needsUpdate: any[] = []
+      let alreadyUpdated = 0
+
+      for (const p of allProducts) {
+        for (const v of p.variants) {
+          const variantUpdated = new Date(v.updated_at).getTime()
+          if (variantUpdated >= cutoff) {
+            // Bu varyant cutoff'tan sonra güncellendi → zaten işlendi
+            alreadyUpdated++
+          } else {
+            // Bu varyant güncellenmedi → güncellenmesi lazım
+            const oldPrice = parseFloat(v.price || '0')
+            const oldCompare = parseFloat(v.compare_at_price || '0')
+            needsUpdate.push({
+              variantId: String(v.id),
+              productTitle: p.title,
+              oldPrice,
+              newPrice: updatePrice !== false ? roundToHundred(oldPrice * (1 + pct)) : oldPrice,
+              oldCompare,
+              newCompare: updateCompare !== false ? (oldCompare > 0 ? roundToHundred(oldCompare * (1 + pct)) : 0) : oldCompare,
+            })
+          }
+        }
+      }
+
+      console.log(`[repair] Found ${needsUpdate.length} un-updated, ${alreadyUpdated} already updated`)
+
+      // Her zaman listeyi dön — frontend chunked apply yapacak
+      return {
+        statusCode: 200,
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          success: true,
+          needsUpdate: needsUpdate.length,
+          alreadyUpdated,
+          total: needsUpdate.length + alreadyUpdated,
+          samples: needsUpdate.slice(0, 20).map(v => ({
+            id: v.variantId,
+            product: v.productTitle,
+            oldPrice: v.oldPrice,
+            newPrice: v.newPrice,
+          })),
+          // Frontend chunked apply için tam liste
+          updates: needsUpdate.map(v => ({
+            variantId: v.variantId,
+            price: String(v.newPrice),
+            comparePrice: v.newCompare > 0 ? String(v.newCompare) : null,
+          })),
+        }),
       }
     }
 
