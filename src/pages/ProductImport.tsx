@@ -33,12 +33,24 @@ interface VariantItem {
   imageIndex: number | null
 }
 
+interface VtonJob {
+  id: string
+  mode: 'standard' | 'ghost' | 'fabric'
+  productImgIdx: number
+  modelImgIdx: number | null
+  status: 'queued' | 'analyzing' | 'generating' | 'polling' | 'done' | 'error'
+  progress: string
+  requestId?: string
+  imageUrl?: string
+  error?: string
+}
+
 interface VtonResult {
   id: string
   mode: string
   imageUrl: string
-  prompt: string
-  selected: boolean // Shopify'a gönderilecek mi
+  jobId: string
+  selected: boolean
 }
 
 const STEPS = [
@@ -116,9 +128,9 @@ export default function ProductImport({ addToast }: Props) {
   const [scrapingModel, setScrapingModel] = useState(false)
   const [selectedProductImg, setSelectedProductImg] = useState(0)
   const [selectedModelImg, setSelectedModelImg] = useState(0)
-  const [vtonGenerating, setVtonGenerating] = useState(false)
+  const [vtonJobs, setVtonJobs] = useState<VtonJob[]>([])
   const [vtonResults, setVtonResults] = useState<VtonResult[]>([])
-  const [vtonProgress, setVtonProgress] = useState('')
+  const [vtonRunning, setVtonRunning] = useState(false)
 
   // Step 6 — Variants
   const [useVariants, setUseVariants] = useState(false)
@@ -311,13 +323,12 @@ export default function ProductImport({ addToast }: Props) {
     }
   }
 
-  // ────────────────── Step 7: VTON ──────────────────
+  // ────────────────── Step 5: VTON Bulk ──────────────────
   const handleScrapeModel = async () => {
     if (!modelUrl) return
     setScrapingModel(true)
     setModelImages([])
     setModelTitle('')
-
     try {
       const res = await fetch('/api/scrape-model-images', {
         method: 'POST',
@@ -326,7 +337,6 @@ export default function ProductImport({ addToast }: Props) {
       })
       const data = await res.json()
       if (!data.success) throw new Error(data.error)
-
       setModelImages(data.images || [])
       setModelTitle(data.title || '')
       addToast({ type: 'success', message: `${data.images.length} manken görseli çekildi` })
@@ -337,177 +347,146 @@ export default function ProductImport({ addToast }: Props) {
     }
   }
 
-  const handleVtonGenerate = async () => {
-    if (!product) return
-    const selectedImgs = images.filter((i) => i.selected).sort((a, b) => a.order - b.order)
-    const productImg = selectedImgs[selectedProductImg]?.url
-    if (!productImg) { addToast({ type: 'error', message: 'Ürün görseli seçin' }); return }
-
+  const addVtonJob = () => {
+    const selImgs = images.filter((i) => i.selected).sort((a, b) => a.order - b.order)
     if (vtonMode === 'standard' && !modelImages[selectedModelImg]) {
       addToast({ type: 'error', message: 'Manken görseli seçin' }); return
     }
+    if (!selImgs[selectedProductImg]) {
+      addToast({ type: 'error', message: 'Ürün görseli seçin' }); return
+    }
+    const job: VtonJob = {
+      id: `job_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+      mode: vtonMode,
+      productImgIdx: selectedProductImg,
+      modelImgIdx: vtonMode === 'standard' ? selectedModelImg : null,
+      status: 'queued',
+      progress: 'Sırada',
+    }
+    setVtonJobs((prev) => [...prev, job])
+    addToast({ type: 'info', message: `${vtonMode} job eklendi` })
+  }
 
-    setVtonGenerating(true)
-    setVtonProgress('Analiz yapılıyor...')
+  const removeVtonJob = (jobId: string) => {
+    setVtonJobs((prev) => prev.filter((j) => j.id !== jobId))
+  }
+
+  const updateJob = (jobId: string, update: Partial<VtonJob>) => {
+    setVtonJobs((prev) => prev.map((j) => j.id === jobId ? { ...j, ...update } : j))
+  }
+
+  const pollForResult = async (requestId: string, jobId: string): Promise<string | null> => {
+    const maxWait = 5 * 60 * 1000
+    const interval = 5000
+    const start = Date.now()
+    while (Date.now() - start < maxWait) {
+      await new Promise((r) => setTimeout(r, interval))
+      const elapsed = Math.round((Date.now() - start) / 1000)
+      updateJob(jobId, { progress: `⏳ Polling... (${elapsed}s)` })
+      try {
+        const res = await fetch('/api/vton-generate', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ action: 'status', requestId }),
+        })
+        const data = await res.json()
+        if (data.status === 'COMPLETED' && data.images?.length > 0) {
+          return data.images[0].url
+        }
+        if (data.status === 'FAILED') throw new Error('FAL generation failed')
+      } catch (e: any) {
+        console.warn('Poll error:', e.message)
+      }
+    }
+    return null
+  }
+
+  const runSingleJob = async (job: VtonJob) => {
+    if (!product) return
+    const selImgs = images.filter((i) => i.selected).sort((a, b) => a.order - b.order)
+    const productImg = selImgs[job.productImgIdx]?.url
+    if (!productImg) { updateJob(job.id, { status: 'error', error: 'Ürün görseli bulunamadı' }); return }
 
     try {
       let modelDesc = ''
       let garmentDesc = ''
 
-      if (vtonMode === 'standard') {
-        // Paralel: manken + ürün analizi
-        setVtonProgress('🔍 Manken ve ürün analizi (paralel)...')
-        const [modelRes, garmentRes] = await Promise.all([
-          fetch('/api/vton-analyze', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              imageUrl: modelImages[selectedModelImg],
-              mode: 'model',
-            }),
-          }).then((r) => r.json()),
-          fetch('/api/vton-analyze', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              imageUrl: productImg,
-              mode: 'garment',
-              productTitle: enrichedTitle || product.title,
-              garmentCategory,
-              fabricInfo: fabricInfo || undefined,
-            }),
-          }).then((r) => r.json()),
+      if (job.mode === 'standard') {
+        const modelImg = modelImages[job.modelImgIdx!]
+        if (!modelImg) { updateJob(job.id, { status: 'error', error: 'Manken görseli bulunamadı' }); return }
+        updateJob(job.id, { status: 'analyzing', progress: '🔍 Analiz (paralel)...' })
+        const [mRes, gRes] = await Promise.all([
+          fetch('/api/vton-analyze', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ imageUrl: modelImg, mode: 'model' }) }).then((r) => r.json()),
+          fetch('/api/vton-analyze', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ imageUrl: productImg, mode: 'garment', productTitle: enrichedTitle || product.title, garmentCategory, fabricInfo: fabricInfo || undefined }) }).then((r) => r.json()),
         ])
-
-        if (!modelRes.success) throw new Error(`Manken analizi: ${modelRes.error}`)
-        if (!garmentRes.success) throw new Error(`Ürün analizi: ${garmentRes.error}`)
-
-        modelDesc = modelRes.description
-        garmentDesc = garmentRes.description
-      } else if (vtonMode === 'ghost') {
-        // Sadece ürün analizi
-        setVtonProgress('🔍 Ürün analizi (ghost mode)...')
-        const res = await fetch('/api/vton-analyze', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            imageUrl: productImg,
-            mode: 'ghost',
-            productTitle: enrichedTitle || product.title,
-            garmentCategory,
-            fabricInfo: fabricInfo || undefined,
-          }),
-        })
-        const data = await res.json()
-        if (!data.success) throw new Error(data.error)
-        garmentDesc = data.description
+        if (!mRes.success) throw new Error(mRes.error)
+        if (!gRes.success) throw new Error(gRes.error)
+        modelDesc = mRes.description
+        garmentDesc = gRes.description
+      } else if (job.mode === 'ghost') {
+        updateJob(job.id, { status: 'analyzing', progress: '🔍 Ghost analiz...' })
+        const res = await fetch('/api/vton-analyze', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ imageUrl: productImg, mode: 'ghost', productTitle: enrichedTitle || product.title, garmentCategory, fabricInfo: fabricInfo || undefined }) }).then((r) => r.json())
+        if (!res.success) throw new Error(res.error)
+        garmentDesc = res.description
       }
-      // Fabric mode: analiz yok
 
-      // FAL AI görsel üret — submit only
-      setVtonProgress('🎨 Görsel üretiliyor (FAL AI)...')
+      updateJob(job.id, { status: 'generating', progress: '🎨 FAL AI üretim...' })
+      const imageUrls = job.mode === 'standard' ? [modelImages[job.modelImgIdx!], productImg] : [productImg]
 
-      const imageUrls = vtonMode === 'standard'
-        ? [modelImages[selectedModelImg], productImg]
-        : [productImg]
+      const genRes = await fetch('/api/vton-generate', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ mode: job.mode, modelDesc, garmentDesc, productTitle: enrichedTitle || product.title, garmentCategory, fabricInfo: fabricInfo || undefined, imageUrls, resolution: '2K', aspectRatio: '9:16' }) }).then((r) => r.json())
 
-      const genRes = await fetch('/api/vton-generate', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          mode: vtonMode,
-          modelDesc,
-          garmentDesc,
-          productTitle: enrichedTitle || product.title,
-          garmentCategory,
-          fabricInfo: fabricInfo || undefined,
-          imageUrls,
-          resolution: '2K',
-          aspectRatio: '9:16',
-        }),
-      })
-      const genData = await genRes.json()
-      if (!genData.success) throw new Error(genData.error)
+      if (!genRes.success) throw new Error(genRes.error)
 
-      // Eğer sync dönüyorsa (images direkt var)
-      if (genData.status === 'COMPLETED' && genData.images?.length > 0) {
-        const newResults: VtonResult[] = genData.images.map((img: any, idx: number) => ({
-          id: `vton_${Date.now()}_${idx}`,
-          mode: vtonMode,
-          imageUrl: img.url,
-          prompt: vtonMode,
+      let resultUrl: string | null = null
+
+      if (genRes.status === 'COMPLETED' && genRes.images?.length > 0) {
+        resultUrl = genRes.images[0].url
+      } else if (genRes.requestId) {
+        updateJob(job.id, { status: 'polling', progress: '⏳ Sonuç bekleniyor...', requestId: genRes.requestId })
+        resultUrl = await pollForResult(genRes.requestId, job.id)
+      }
+
+      if (resultUrl) {
+        updateJob(job.id, { status: 'done', progress: '✅ Tamamlandı', imageUrl: resultUrl })
+        setVtonResults((prev) => [...prev, {
+          id: `vton_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+          mode: job.mode,
+          imageUrl: resultUrl!,
+          jobId: job.id,
           selected: false,
-        }))
-        setVtonResults((prev) => [...newResults, ...prev])
-        addToast({ type: 'success', message: '✅ VTON görseli üretildi!' })
-      } else if (genData.requestId) {
-        // Async — frontend polling (5sn aralık, 5dk timeout)
-        setVtonProgress('⏳ Sonuç bekleniyor (5sn aralıklarla kontrol)...')
-        const maxWait = 5 * 60 * 1000 // 5 dakika
-        const interval = 5000 // 5 saniye
-        const start = Date.now()
-
-        while (Date.now() - start < maxWait) {
-          await new Promise((r) => setTimeout(r, interval))
-          const elapsed = Math.round((Date.now() - start) / 1000)
-          setVtonProgress(`⏳ Sonuç bekleniyor... (${elapsed}s)`)
-
-          try {
-            const pollRes = await fetch('/api/vton-generate', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ action: 'status', requestId: genData.requestId }),
-            })
-            const pollData = await pollRes.json()
-
-            if (pollData.status === 'COMPLETED' && pollData.images?.length > 0) {
-              const newResults: VtonResult[] = pollData.images.map((img: any, idx: number) => ({
-                id: `vton_${Date.now()}_${idx}`,
-                mode: vtonMode,
-                imageUrl: img.url,
-                prompt: vtonMode,
-                selected: false,
-              }))
-              setVtonResults((prev) => [...newResults, ...prev])
-              addToast({ type: 'success', message: '✅ VTON görseli üretildi!' })
-              break
-            }
-
-            if (pollData.status === 'FAILED') {
-              throw new Error('FAL AI üretim başarısız oldu')
-            }
-          } catch (pollErr: any) {
-            // Poll hatası — sadece logla, döngüye devam et
-            console.warn('Poll error:', pollErr.message)
-          }
-        }
+        }])
       } else {
-        addToast({ type: 'info', message: 'Görsel üretilemedi' })
+        updateJob(job.id, { status: 'error', error: 'Sonuç alınamadı (timeout)' })
       }
     } catch (err: any) {
-      addToast({ type: 'error', message: err.message })
-    } finally {
-      setVtonGenerating(false)
-      setVtonProgress('')
+      updateJob(job.id, { status: 'error', error: err.message, progress: '❌ Hata' })
     }
   }
 
+  const runAllJobs = async () => {
+    const pendingJobs = vtonJobs.filter((j) => j.status === 'queued')
+    if (pendingJobs.length === 0) { addToast({ type: 'info', message: 'Kuyrukta bekleyen iş yok' }); return }
+    setVtonRunning(true)
+    for (const job of pendingJobs) {
+      await runSingleJob(job)
+    }
+    setVtonRunning(false)
+    addToast({ type: 'success', message: `✅ ${pendingJobs.length} iş tamamlandı` })
+  }
+
   const toggleVtonResult = (id: string) => {
-    setVtonResults((prev) => prev.map((r) =>
-      r.id === id ? { ...r, selected: !r.selected } : r
-    ))
+    setVtonResults((prev) => prev.map((r) => r.id === id ? { ...r, selected: !r.selected } : r))
   }
 
   const addVtonToImages = () => {
     const selected = vtonResults.filter((r) => r.selected)
     if (selected.length === 0) { addToast({ type: 'info', message: 'Hiçbir VTON görseli seçilmedi' }); return }
-
     setImages((prev) => {
-      const newImages = selected.map((r, i) => ({
-        url: r.imageUrl,
-        selected: true,
-        order: prev.length + i,
-      }))
+      const newImages = selected.map((r, i) => ({ url: r.imageUrl, selected: true, order: prev.length + i }))
       return [...prev, ...newImages]
     })
     addToast({ type: 'success', message: `${selected.length} VTON görseli eklendi` })
@@ -955,23 +934,81 @@ export default function ProductImport({ addToast }: Props) {
               )}
             </div>
 
-            {/* Generate Button */}
-            <button className="btn btn-primary" onClick={handleVtonGenerate} disabled={vtonGenerating}
-              style={{ width: '100%', padding: '14px 20px', fontSize: 14, marginBottom: 16 }}>
-              {vtonGenerating ? (
-                <><span className="spinner" /> {vtonProgress || 'İşleniyor...'}</>
-              ) : (
-                vtonMode === 'standard' ? '🎨 VTON Üret (Manken + Ürün)' :
-                vtonMode === 'ghost' ? '👻 Ghost Görsel Üret' :
-                '🧵 Kumaş Makro Üret'
-              )}
+            {/* ── Kuyruğa Ekle Butonu ── */}
+            <button className="btn" onClick={addVtonJob}
+              style={{ width: '100%', padding: '12px 20px', fontSize: 13, marginBottom: 16,
+                background: 'var(--bg-card)', border: '2px dashed var(--primary)', color: 'var(--primary)' }}>
+              ➕ Bu kombinasyonu kuyruğa ekle ({vtonMode === 'standard'
+                ? `Ürün #${selectedProductImg + 1} + Manken #${selectedModelImg + 1}`
+                : vtonMode === 'ghost' ? `Ürün #${selectedProductImg + 1} — Ghost`
+                : `Ürün #${selectedProductImg + 1} — Fabric`})
             </button>
 
-            {/* Sonuçlar */}
+            {/* ── İş Kuyruğu ── */}
+            {vtonJobs.length > 0 && (
+              <div style={{ marginBottom: 16 }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+                  <div style={{ fontSize: 13, fontWeight: 600 }}>
+                    📋 İş Kuyruğu ({vtonJobs.length})
+                  </div>
+                  <button className="btn btn-primary" onClick={runAllJobs} disabled={vtonRunning}
+                    style={{ padding: '8px 20px' }}>
+                    {vtonRunning ? <><span className="spinner" /> Çalışıyor...</> : `🚀 Tümünü Çalıştır (${vtonJobs.filter((j) => j.status === 'queued').length})`}
+                  </button>
+                </div>
+
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                  {vtonJobs.map((job) => {
+                    const selImgs = images.filter((i) => i.selected).sort((a, b) => a.order - b.order)
+                    return (
+                      <div key={job.id} style={{
+                        display: 'flex', alignItems: 'center', gap: 10, padding: '8px 12px',
+                        background: 'var(--bg-card)', borderRadius: 8,
+                        border: job.status === 'done' ? '2px solid var(--success)' : job.status === 'error' ? '2px solid var(--danger)' : '1px solid var(--border)',
+                      }}>
+                        {/* Thumbnail */}
+                        <img src={selImgs[job.productImgIdx]?.url || ''} alt=""
+                          style={{ width: 40, height: 50, objectFit: 'cover', borderRadius: 4, flexShrink: 0 }} />
+                        {job.mode === 'standard' && job.modelImgIdx !== null && (
+                          <>
+                            <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>+</span>
+                            <img src={modelImages[job.modelImgIdx] || ''} alt=""
+                              style={{ width: 40, height: 50, objectFit: 'cover', borderRadius: 4, flexShrink: 0 }} />
+                          </>
+                        )}
+                        {/* Info */}
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                          <div style={{ fontSize: 12, fontWeight: 600 }}>
+                            {job.mode === 'standard' ? '👤' : job.mode === 'ghost' ? '👻' : '🧵'} {job.mode}
+                          </div>
+                          <div style={{ fontSize: 10, color: job.status === 'error' ? 'var(--danger)' : 'var(--text-muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                            {job.error || job.progress}
+                          </div>
+                        </div>
+                        {/* Result thumbnail */}
+                        {job.status === 'done' && job.imageUrl && (
+                          <img src={job.imageUrl} alt="" style={{ width: 40, height: 50, objectFit: 'cover', borderRadius: 4, flexShrink: 0, border: '2px solid var(--success)' }} />
+                        )}
+                        {/* Status icon */}
+                        <span style={{ fontSize: 16, flexShrink: 0 }}>
+                          {job.status === 'queued' ? '⏳' : job.status === 'done' ? '✅' : job.status === 'error' ? '❌' : '⚙️'}
+                        </span>
+                        {/* Remove */}
+                        {(job.status === 'queued' || job.status === 'done' || job.status === 'error') && (
+                          <button className="btn btn-sm" onClick={() => removeVtonJob(job.id)} style={{ flexShrink: 0 }}>✕</button>
+                        )}
+                      </div>
+                    )
+                  })}
+                </div>
+              </div>
+            )}
+
+            {/* ── Sonuç Galerisi ── */}
             {vtonResults.length > 0 && (
               <div style={{ marginBottom: 16 }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
-                  <div style={{ fontSize: 12, fontWeight: 600 }}>
+                  <div style={{ fontSize: 13, fontWeight: 600 }}>
                     🖼️ Üretilen Görseller ({vtonResults.length})
                   </div>
                   <button className="btn btn-sm" onClick={addVtonToImages}
@@ -986,7 +1023,7 @@ export default function ProductImport({ addToast }: Props) {
                       style={{
                         border: r.selected ? '3px solid var(--success)' : '2px solid var(--border)',
                         borderRadius: 8, overflow: 'hidden', cursor: 'pointer',
-                        opacity: r.selected ? 1 : 0.7, transition: 'all .2s', position: 'relative',
+                        opacity: r.selected ? 1 : 0.7, transition: 'all .2s',
                       }}>
                       <img src={r.imageUrl} alt="" style={{ width: '100%', height: 200, objectFit: 'cover' }} />
                       <div style={{ padding: '4px 8px', fontSize: 10, color: 'var(--text-muted)', display: 'flex', justifyContent: 'space-between' }}>
