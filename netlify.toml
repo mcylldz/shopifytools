@@ -9,6 +9,9 @@
   [functions."vton-generate"]
     timeout = 60
 
+  [functions."resize-image"]
+    timeout = 60
+
 [dev]
   command = "npm run dev:vite"
   targetPort = 3000
@@ -18,4 +21,9 @@
 [[redirects]]
   from = "/api/*"
   to = "/.netlify/functions/:splat"
+  status = 200
+
+[[redirects]]
+  from = "/*"
+  to = "/index.html"
   status = 200
