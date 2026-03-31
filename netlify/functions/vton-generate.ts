@@ -1,8 +1,11 @@
 import type { Handler } from '@netlify/functions'
+import { fal } from '@fal-ai/client'
 
 const FAL_KEY = process.env.FAL_KEY || ''
 const FAL_MODEL = 'fal-ai/nano-banana-2/edit'
-const FAL_QUEUE_BASE = `https://queue.fal.run/${FAL_MODEL}`
+
+// Configure FAL client
+fal.config({ credentials: FAL_KEY })
 
 // ──────────────── Prompt Templates ────────────────
 
@@ -48,102 +51,96 @@ export const handler: Handler = async (event) => {
     return { statusCode: 500, body: JSON.stringify({ error: 'FAL_KEY env variable eksik' }) }
   }
 
-  const headers = {
-    'Authorization': `Key ${FAL_KEY}`,
-    'Content-Type': 'application/json',
-  }
-
   try {
     const body = JSON.parse(event.body || '{}')
     const { action, requestId } = body
 
     // ══════════════════════════════════════════════
-    // ACTION: STATUS — Check request status
+    // ACTION: STATUS — Check request status via SDK
     // ══════════════════════════════════════════════
     if (action === 'status' && requestId) {
-      console.log(`[vton] Checking status: ${requestId}`)
+      console.log(`[vton] Checking status via SDK: ${requestId}`)
 
-      // 1. Status endpoint
-      const statusUrl = `${FAL_QUEUE_BASE}/requests/${requestId}/status`
-      console.log(`[vton] Status URL: ${statusUrl}`)
+      try {
+        // Önce status kontrol et
+        const status = await fal.queue.status(FAL_MODEL, {
+          requestId,
+          logs: true,
+        })
 
-      const statusRes = await fetch(statusUrl, {
-        method: 'GET',
-        headers: { 'Authorization': `Key ${FAL_KEY}` },
-      })
+        console.log(`[vton] SDK status: ${JSON.stringify(status).substring(0, 300)}`)
 
-      console.log(`[vton] Status response: ${statusRes.status}`)
+        if (status.status === 'COMPLETED') {
+          console.log(`[vton] COMPLETED — fetching result via SDK...`)
 
-      if (!statusRes.ok) {
-        const errText = await statusRes.text()
-        console.log(`[vton] Status error body: ${errText}`)
+          // Result'ı al
+          const result = await fal.queue.result(FAL_MODEL, { requestId })
+          console.log(`[vton] SDK result keys: ${Object.keys(result?.data || {}).join(', ')}`)
+
+          const data = result?.data as any
+          const images = data?.images || []
+          console.log(`[vton] Images found: ${images.length}`)
+
+          if (images.length > 0) {
+            console.log(`[vton] Image URL: ${images[0]?.url?.substring(0, 80)}`)
+          }
+
+          return {
+            statusCode: 200,
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              success: true,
+              status: 'COMPLETED',
+              images: images,
+            }),
+          }
+        }
+
+        // Henüz bitmedi
+        return {
+          statusCode: 200,
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            success: true,
+            status: status.status || 'IN_PROGRESS',
+            queuePosition: (status as any).queue_position,
+          }),
+        }
+      } catch (statusErr: any) {
+        console.error(`[vton] SDK status error: ${statusErr.message}`)
+
+        // Status hatası — belki direkt result dene
+        try {
+          const result = await fal.queue.result(FAL_MODEL, { requestId })
+          const data = result?.data as any
+          const images = data?.images || []
+
+          if (images.length > 0) {
+            console.log(`[vton] Fallback result worked! Images: ${images.length}`)
+            return {
+              statusCode: 200,
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                success: true,
+                status: 'COMPLETED',
+                images: images,
+              }),
+            }
+          }
+        } catch (resultErr: any) {
+          console.log(`[vton] Fallback result also failed: ${resultErr.message}`)
+        }
+
         return {
           statusCode: 200,
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ success: true, status: 'IN_PROGRESS' }),
         }
       }
-
-      const statusData = await statusRes.json()
-      console.log(`[vton] Status data: ${JSON.stringify(statusData)}`)
-
-      // Not completed yet
-      if (statusData.status !== 'COMPLETED') {
-        return {
-          statusCode: 200,
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            success: true,
-            status: statusData.status || 'IN_PROGRESS',
-            queuePosition: statusData.queue_position,
-          }),
-        }
-      }
-
-      // 2. COMPLETED — fetch result from /response endpoint
-      console.log(`[vton] COMPLETED! Fetching result...`)
-      const responseUrl = `${FAL_QUEUE_BASE}/requests/${requestId}/response`
-      console.log(`[vton] Response URL: ${responseUrl}`)
-
-      const resultRes = await fetch(responseUrl, {
-        method: 'GET',
-        headers: { 'Authorization': `Key ${FAL_KEY}` },
-      })
-
-      console.log(`[vton] Result response: ${resultRes.status}`)
-
-      if (!resultRes.ok) {
-        const errText = await resultRes.text()
-        console.log(`[vton] Result error: ${errText}`)
-        return {
-          statusCode: 200,
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ success: true, status: 'COMPLETED_NO_RESULT' }),
-        }
-      }
-
-      const result = await resultRes.json()
-      console.log(`[vton] Result keys: ${Object.keys(result).join(', ')}`)
-
-      const images = result.images || []
-      console.log(`[vton] Images count: ${images.length}`)
-      if (images.length > 0) {
-        console.log(`[vton] First image URL: ${images[0].url?.substring(0, 80)}`)
-      }
-
-      return {
-        statusCode: 200,
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          success: true,
-          status: 'COMPLETED',
-          images: images,
-        }),
-      }
     }
 
     // ══════════════════════════════════════════════
-    // ACTION: SUBMIT — Submit new job to queue
+    // ACTION: SUBMIT — Submit job via SDK
     // ══════════════════════════════════════════════
     const { mode, modelDesc, garmentDesc, productTitle, garmentCategory, fabricInfo, imageUrls, resolution, aspectRatio } = body
 
@@ -166,12 +163,10 @@ export const handler: Handler = async (event) => {
       throw new Error('En az bir referans görsel URL gerekli')
     }
 
-    console.log(`[vton] Submit — mode: ${mode}, images: ${imageUrls.length}`)
+    console.log(`[vton] Submitting via SDK — mode: ${mode}, images: ${imageUrls.length}`)
 
-    const submitRes = await fetch(FAL_QUEUE_BASE, {
-      method: 'POST',
-      headers,
-      body: JSON.stringify({
+    const { request_id } = await fal.queue.submit(FAL_MODEL, {
+      input: {
         prompt,
         image_urls: imageUrls,
         resolution: resolution || '2K',
@@ -180,36 +175,10 @@ export const handler: Handler = async (event) => {
         output_format: 'png',
         safety_tolerance: '6',
         limit_generations: true,
-      }),
+      },
     })
 
-    if (!submitRes.ok) {
-      const errText = await submitRes.text()
-      throw new Error(`FAL submit failed (${submitRes.status}): ${errText}`)
-    }
-
-    const submitData = await submitRes.json()
-    console.log(`[vton] Submit response: ${JSON.stringify(submitData).substring(0, 300)}`)
-
-    // FAL queue response: { request_id, response_url, status_url, cancel_url, queue_position }
-    const rid = submitData.request_id
-    if (!rid) {
-      // Sync result — images directly in response
-      if (submitData.images?.length > 0) {
-        return {
-          statusCode: 200,
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            success: true,
-            status: 'COMPLETED',
-            images: submitData.images,
-          }),
-        }
-      }
-      throw new Error('FAL: No request_id or images in response')
-    }
-
-    console.log(`[vton] Queued — request_id: ${rid}, position: ${submitData.queue_position}`)
+    console.log(`[vton] Queued via SDK — request_id: ${request_id}`)
 
     return {
       statusCode: 200,
@@ -217,9 +186,7 @@ export const handler: Handler = async (event) => {
       body: JSON.stringify({
         success: true,
         status: 'QUEUED',
-        requestId: rid,
-        statusUrl: submitData.status_url,
-        responseUrl: submitData.response_url,
+        requestId: request_id,
       }),
     }
   } catch (err: any) {
