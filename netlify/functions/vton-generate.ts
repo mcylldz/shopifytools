@@ -144,6 +144,7 @@ export const handler: Handler = async (event) => {
       const geminiData = JSON.parse(result.body)
       const candidates = geminiData.candidates || []
       const responseParts = candidates[0]?.content?.parts || []
+      const geminiUsage = geminiData.usageMetadata || {}
 
       console.log(`[vton] Gemini parts count: ${responseParts.length}`)
       for (let i = 0; i < responseParts.length; i++) {
@@ -162,6 +163,11 @@ export const handler: Handler = async (event) => {
             success: true,
             imageBase64: imgData.data,
             mimeType: imgData.mime_type || imgData.mimeType || 'image/png',
+            usage: {
+              model,
+              input_tokens: geminiUsage.promptTokenCount || 0,
+              output_tokens: geminiUsage.candidatesTokenCount || 0,
+            },
           }),
         }
       }
@@ -177,6 +183,11 @@ export const handler: Handler = async (event) => {
             success: true,
             fileUri: fd.file_uri || fd.fileUri,
             mimeType: fd.mime_type || fd.mimeType || 'image/png',
+            usage: {
+              model,
+              input_tokens: geminiUsage.promptTokenCount || 0,
+              output_tokens: geminiUsage.candidatesTokenCount || 0,
+            },
           }),
         }
       }
@@ -240,11 +251,20 @@ OUTPUT ONLY a concise, comma-separated descriptive string.`
 
       const data = JSON.parse(result.body)
       const description = data.content?.[0]?.text || ''
+      const usage = data.usage || {}
 
       return {
         statusCode: 200,
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ success: true, description }),
+        body: JSON.stringify({
+          success: true,
+          description,
+          usage: {
+            model: 'claude-sonnet-4-20250514',
+            input_tokens: usage.input_tokens || 0,
+            output_tokens: usage.output_tokens || 0,
+          },
+        }),
       }
     }
 

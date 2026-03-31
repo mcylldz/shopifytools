@@ -1,5 +1,7 @@
 import { useState } from 'react'
 import type { ToastData } from '../components/Toast'
+import { useCostTracker } from '../hooks/useCostTracker'
+import CostPanel from '../components/CostPanel'
 
 interface Props {
   addToast: (t: Omit<ToastData, 'id'>) => void
@@ -77,6 +79,9 @@ export default function VtonTool({ addToast }: Props) {
   const [pushMode, setPushMode] = useState<'add' | 'replace'>('add')
   const [pushLoading, setPushLoading] = useState(false)
 
+  // Cost tracker
+  const { addCost, summary: costSummary } = useCostTracker()
+
   // ── Shopify URL'den görsel çek ──
   const fetchImages = async (side: 'garment' | 'model') => {
     const url = side === 'garment' ? garmentUrl : modelUrl
@@ -147,12 +152,16 @@ export default function VtonTool({ addToast }: Props) {
           if (!mRes.success) throw new Error(mRes.error || 'Model analiz başarısız')
           if (!gRes.success) throw new Error(gRes.error || 'Ürün analiz başarısız')
           modelDesc = mRes.description; garmentDesc = gRes.description
+          // Track costs
+          if (mRes.usage) addCost(mRes.usage.model || 'claude-sonnet-4-20250514', 'VTON Model Analiz', mRes.usage.input_tokens, mRes.usage.output_tokens)
+          if (gRes.usage) addCost(gRes.usage.model || 'claude-sonnet-4-20250514', 'VTON Ürün Analiz', gRes.usage.input_tokens, gRes.usage.output_tokens)
         } else {
           const gRes = await fetch('/api/vton-generate', { method: 'POST', headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ action: 'analyze', imageUrl: pair.garmentImg, mode: 'ghost',
               productTitle: garmentTitle, garmentCategory: pair.category, fabricInfo: pair.fabricInfo }) }).then(r => r.json())
           if (!gRes.success) throw new Error(gRes.error || 'Analiz başarısız')
           garmentDesc = gRes.description
+          if (gRes.usage) addCost(gRes.usage.model || 'claude-sonnet-4-20250514', `VTON ${pair.mode} Analiz`, gRes.usage.input_tokens, gRes.usage.output_tokens)
         }
       }
 
@@ -166,6 +175,8 @@ export default function VtonTool({ addToast }: Props) {
           body: JSON.stringify({ action: 'gemini_generate', prompt, imageUrls, geminiModel: pair.falModel }) }).then(r => r.json())
         if (!geminiRes.success) throw new Error(geminiRes.error || 'Gemini üretim başarısız')
         const dataUrl = `data:${geminiRes.mimeType};base64,${geminiRes.imageBase64}`
+        // Track Gemini cost
+        if (geminiRes.usage) addCost(geminiRes.usage.model || pair.falModel, 'Gemini Görsel Üretim', geminiRes.usage.input_tokens, geminiRes.usage.output_tokens)
         update({ status: 'done', progress: '✅ Tamamlandı', resultUrl: dataUrl })
         setResults(prev => [...prev, { id: pair.id, url: dataUrl, mode: pair.mode, isBase64: true }])
         return
@@ -194,7 +205,11 @@ export default function VtonTool({ addToast }: Props) {
           const resultRes = await fetch('/api/vton-generate', { method: 'POST', headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ action: 'fal_status', path: `/fal-ai/${falModelPath}/requests/${requestId}` }) }).then(r => r.json())
           const imgUrl = resultRes.images?.[0]?.url
-          if (imgUrl) { update({ status: 'done', progress: '✅ Tamamlandı', resultUrl: imgUrl }); setResults(prev => [...prev, { id: pair.id, url: imgUrl, mode: pair.mode }]); return }
+          if (imgUrl) {
+            // Track FAL cost
+            addCost(`fal:${pair.falModel}`, 'FAL Görsel Üretim')
+            update({ status: 'done', progress: '✅ Tamamlandı', resultUrl: imgUrl }); setResults(prev => [...prev, { id: pair.id, url: imgUrl, mode: pair.mode }]); return
+          }
           throw new Error('Görsel bulunamadı')
         }
         if (statusRes.status === 'FAILED' || statusRes.status === 'ERROR') throw new Error('FAL üretim başarısız')
@@ -514,6 +529,9 @@ export default function VtonTool({ addToast }: Props) {
           </div>
         </div>
       )}
+
+      {/* Cost Tracker */}
+      <CostPanel summary={costSummary} title="VTON Maliyet" />
     </>
   )
 }

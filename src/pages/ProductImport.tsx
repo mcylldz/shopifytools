@@ -1,5 +1,7 @@
 import { useState, useRef } from 'react'
 import type { ToastData } from '../components/Toast'
+import { useCostTracker } from '../hooks/useCostTracker'
+import CostPanel from '../components/CostPanel'
 
 interface Props {
   addToast: (t: Omit<ToastData, 'id'>) => void
@@ -113,6 +115,9 @@ export default function ProductImport({ addToast }: Props) {
 
   // Step 4 — Enrichment
   const [enrichment, setEnrichment] = useState<any>(null)
+
+  // Cost tracker
+  const { addCost, summary: costSummary } = useCostTracker()
   const [enriching, setEnriching] = useState(false)
   const [enrichedTitle, setEnrichedTitle] = useState('')
   const [enrichedDesc, setEnrichedDesc] = useState('')
@@ -343,6 +348,15 @@ export default function ProductImport({ addToast }: Props) {
       setEnrichment(result)
       if (result?.google?.title) setEnrichedTitle(result.google.title)
       if (result?.google?.description) setEnrichedDesc(result.google.description)
+      // Track enrichment cost
+      if (eData.usage) {
+        addCost(
+          'claude-sonnet-4-20250514',
+          'Enrichment',
+          eData.usage.input_tokens,
+          eData.usage.output_tokens
+        )
+      }
       addToast({ type: 'success', message: 'AI enrichment tamamlandı!' })
     } catch (err: any) {
       addToast({ type: 'error', message: err.message })
@@ -1354,6 +1368,9 @@ export default function ProductImport({ addToast }: Props) {
           </div>
         )}
       </div>
+
+      {/* Cost Tracker */}
+      <CostPanel summary={costSummary} title="Import Maliyet" />
     </>
   )
 }
