@@ -121,11 +121,13 @@ export const handler: Handler = async (event) => {
         }
       }
 
+      const aspectRatio = body.aspectRatio || '1:1'
       const geminiPayload = JSON.stringify({
         contents: [{ parts }],
         generationConfig: {
           responseModalities: ['TEXT', 'IMAGE'],
           temperature: 1,
+          aspectRatio,
         },
       })
 

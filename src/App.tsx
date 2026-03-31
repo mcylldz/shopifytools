@@ -4,15 +4,17 @@ import ProductEnrichment from './pages/ProductEnrichment'
 import ProductImport from './pages/ProductImport'
 import VtonTool from './pages/VtonTool'
 import PriceUpdate from './pages/PriceUpdate'
+import ImageResizer from './pages/ImageResizer'
 import Toast, { ToastData } from './components/Toast'
 
-type Page = 'price-rounder' | 'product-enrichment' | 'product-import' | 'vton-tool' | 'price-update'
+type Page = 'price-rounder' | 'product-enrichment' | 'product-import' | 'vton-tool' | 'price-update' | 'image-resizer'
 
 const navItems: { id: Page; icon: string; label: string }[] = [
   { id: 'price-rounder', icon: '₺', label: 'Fiyat Yuvarlama' },
   { id: 'product-enrichment', icon: '🧠', label: 'AI Enrichment' },
   { id: 'product-import', icon: '📦', label: 'Ürün Import' },
   { id: 'vton-tool', icon: '👗', label: 'Virtual Try-On' },
+  { id: 'image-resizer', icon: '📐', label: 'Image Resizer' },
   { id: 'price-update', icon: '💰', label: 'Fiyat Güncelleme' },
 ]
 
@@ -63,6 +65,7 @@ export default function App() {
         {activePage === 'product-enrichment' && <ProductEnrichment addToast={addToast} />}
         {activePage === 'product-import' && <ProductImport addToast={addToast} />}
         {activePage === 'vton-tool' && <VtonTool addToast={addToast} />}
+        {activePage === 'image-resizer' && <ImageResizer addToast={addToast} />}
         {activePage === 'price-update' && <PriceUpdate addToast={addToast} />}
       </main>
 

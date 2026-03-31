@@ -33,6 +33,7 @@ interface VtonPair {
   targetColor?: string
   sceneHint?: string
   detailHint?: string
+  aspectRatio: string
   aiProvider: string
   falModel: string
   status: 'pending' | 'analyzing' | 'generating' | 'polling' | 'done' | 'error'
@@ -88,6 +89,7 @@ export default function VtonTool({ addToast }: Props) {
   const [sceneHint, setSceneHint] = useState('')
   const [detailHint, setDetailHint] = useState('')
   const [cropIndex, setCropIndex] = useState<number | null>(null)
+  const [outputSize, setOutputSize] = useState('1:1')
   const [aiProvider, setAiProvider] = useState('fal:nano-banana-2')
 
   const [pairs, setPairs] = useState<VtonPair[]>([])
@@ -153,6 +155,7 @@ export default function VtonTool({ addToast }: Props) {
       targetColor: targetColor || undefined,
       sceneHint: sceneHint || undefined,
       detailHint: detailHint || undefined,
+      aspectRatio: outputSize,
       aiProvider: provider, falModel: mdl,
       status: 'pending', progress: 'Bekliyor',
     }])
@@ -163,37 +166,32 @@ export default function VtonTool({ addToast }: Props) {
   // ── Build prompt ──
   const buildPrompt = (pair: VtonPair, modelDesc: string, garmentDesc: string) => {
     const sideText = pair.side === 'back' ? 'BACK VIEW of the garment' : 'FRONT VIEW of the garment'
+    const ratioMap: Record<string, string> = { '1:1': 'square 1:1', '3:4': 'portrait 3:4', '4:3': 'landscape 4:3', '9:16': 'tall portrait 9:16', '16:9': 'wide landscape 16:9' }
+
+    let base = ''
     switch (pair.mode) {
       case 'standard':
-        return `Professional editorial fashion photography. The exact same model from image 1 wearing a ${garmentDesc}. Show the ${sideText}. The model description: ${modelDesc}. IDENTITY & FACE: Maintain exact facial features. TECHNICAL: Realistic fabric physics, 8k resolution, photorealistic.`
-
+        base = `Professional editorial fashion photography. The exact same model from image 1 wearing a ${garmentDesc}. Show the ${sideText}. The model description: ${modelDesc}. IDENTITY & FACE: Maintain exact facial features. TECHNICAL: Realistic fabric physics, 8k resolution, photorealistic.`; break
       case 'ghost':
-        return `Professional studio product photography of a ${garmentDesc}. ${sideText}. Invisible ghost mannequin effect. Pure white background. Soft studio lighting. 8K resolution, photorealistic.`
-
+        base = `Professional studio product photography of a ${garmentDesc}. ${sideText}. Invisible ghost mannequin effect. Pure white background. Soft studio lighting. 8K resolution, photorealistic.`; break
       case 'fabric':
-        return `Professional product photography of fabric draped on a flat surface, slightly gathered with natural soft folds and waves. Shot from a low diagonal angle (approximately 30 degrees), NOT from directly above. ${pair.fabricInfo ? `Fabric: ${pair.fabricInfo}.` : ''} Show the full texture and weave of the material. Soft diffused studio lighting, shallow depth of field, clean neutral background. The fabric should look like someone casually placed the garment on a table and photographed it up close from a slight angle.`
-
+        base = `Professional product photography of fabric draped on a flat surface, slightly gathered with natural soft folds and waves. Shot from a low diagonal angle (approximately 30 degrees), NOT from directly above. ${pair.fabricInfo ? `Fabric: ${pair.fabricInfo}.` : ''} Show the full texture and weave of the material. Soft diffused studio lighting, shallow depth of field, clean neutral background.`; break
       case 'flatlay':
-        return `Professional flat lay product photography, top-down bird's eye view at exactly 90 degrees. A ${garmentDesc} neatly laid out on a clean, minimal white surface. The garment is carefully arranged with sleeves folded symmetrically, all wrinkles smoothed out. Styled with complementary accessories placed around it (sunglasses, small handbag, delicate jewelry, elegant shoes). COMPOSITION: Centered, balanced negative space, Instagram-ready square format aesthetic. LIGHTING: Bright, even, shadowless top lighting — professional catalog flat lay. TECHNICAL: 8K resolution, crisp focus across entire frame, no perspective distortion.`
-
+        base = `Professional flat lay product photography, top-down bird's eye view at exactly 90 degrees. A ${garmentDesc} neatly laid out on a clean, minimal white surface. Styled with complementary accessories. LIGHTING: Bright, even, shadowless top lighting. TECHNICAL: 8K resolution, crisp focus, no perspective distortion.`; break
       case 'detail':
-        return `Extreme close-up macro product photography of a ${garmentDesc}. Focus on the most distinctive design detail: ${pair.detailHint || 'buttons, stitching, embroidery, fabric texture, or unique design elements'}. CAMERA: Shallow depth of field (f/2.8), the detail element is razor-sharp while background softly blurs. ANGLE: Slightly angled (about 30-45 degrees) to show dimensionality and texture depth. LIGHTING: Soft directional studio light from upper-left, creating subtle shadows that reveal texture and craftsmanship. BACKGROUND: The rest of the garment serves as natural bokeh background. MOOD: Luxurious, high-end, emphasizing quality. TECHNICAL: 8K macro photography, individual thread detail visible, color-accurate.`
-
+        base = `Extreme close-up macro product photography of a ${garmentDesc}. Focus on: ${pair.detailHint || 'buttons, stitching, embroidery, fabric texture'}. Shallow depth of field, razor-sharp detail, soft directional lighting. TECHNICAL: 8K macro, individual thread detail, color-accurate.`; break
       case 'lifestyle':
-        return `Cinematic lifestyle editorial fashion photography. A ${modelDesc} wearing a ${garmentDesc}. ${sideText}. SETTING: ${pair.sceneHint || 'European café terrace with warm afternoon golden sunlight, clean minimalist urban architecture'}. POSE: Natural, candid moment — walking, looking away, adjusting hair, or holding a coffee cup. NOT stiff catalog pose. MOOD: Aspirational, effortless elegance, warm and inviting. LIGHTING: Golden hour natural light with soft fill, warm skin tones, gentle shadows. COLOR GRADE: Warm tones, slightly desaturated earth palette, editorial magazine aesthetic. COMPOSITION: Rule of thirds, environmental context visible, depth through foreground/background elements. IDENTITY & FACE: Maintain exact facial features from reference. TECHNICAL: 85mm equivalent lens, f/2.0 shallow DOF, 8K, photorealistic fabric physics.`
-
+        base = `Cinematic lifestyle editorial fashion photography. A ${modelDesc} wearing a ${garmentDesc}. ${sideText}. SETTING: ${pair.sceneHint || 'European café terrace with warm golden sunlight'}. Natural candid pose. Golden hour lighting. IDENTITY & FACE: Maintain exact facial features. TECHNICAL: 85mm, f/2.0, 8K, photorealistic.`; break
       case 'colorswap':
-        return `Exact same garment from the reference image: a ${garmentDesc}. CHANGE ONLY THE COLOR to ${pair.targetColor}. Keep EVERYTHING else IDENTICAL: same exact garment shape, silhouette, cut, style, fit, fabric texture, buttons, zippers, all design details, stitching, patterns layout. If the garment has a pattern (stripes, dots, floral), keep the SAME pattern but shift all colors to ${pair.targetColor} tones. The background, lighting, angle, and composition must remain EXACTLY the same as the reference. DO NOT change the garment design, style, or any structural element. ONLY the color changes. TECHNICAL: Color-accurate rendering, photorealistic, 8K.`
-
+        base = `Exact same garment from reference: a ${garmentDesc}. CHANGE ONLY THE COLOR to ${pair.targetColor}. Keep everything else identical. TECHNICAL: Color-accurate, photorealistic, 8K.`; break
       case 'moodboard':
-        return `Professional fashion mood board / outfit collage composition. CENTER PIECE: A ${garmentDesc} as the main focal item, displayed flat or slightly angled. COMPLEMENTARY ITEMS arranged around it: matching shoes, a handbag, sunglasses, delicate jewelry, a watch, and a fragrance bottle. STYLE: Chic, modern, feminine aesthetic with cohesive color palette complementing the garment. LAYOUT: Clean, organized grid-style arrangement with generous white space between items. Not cluttered. SURFACE: Clean white or light marble background, consistent soft shadows under each item. LIGHTING: Bright, even, professional product studio lighting. MOOD: Curated, editorial, Pinterest-worthy outfit inspiration. TECHNICAL: Sharp focus on all items, 8K resolution, color-accurate, professional catalog quality.`
-
+        base = `Professional fashion mood board collage. CENTER: A ${garmentDesc}. AROUND IT: matching shoes, handbag, sunglasses, jewelry, watch. Clean white surface, organized layout. TECHNICAL: Sharp focus, 8K, color-accurate.`; break
       case 'sizechart':
-        return `Professional product photography showing a ${garmentDesc} laid flat on a clean white surface with scale reference. A standard 30cm wooden ruler is placed alongside the garment for size reference. The garment is laid completely flat with all edges visible, sleeves extended outward. CAMERA: Perfectly top-down 90-degree bird's eye view, no perspective distortion. LIGHTING: Bright, even, shadowless studio lighting for accurate measurement reading. COMPOSITION: Full garment visible with generous margins, maximizing size context. TECHNICAL: 8K, razor-sharp focus, color-accurate, distortion-free optics.`
-
+        base = `Product photography of a ${garmentDesc} laid flat on white surface with 30cm ruler for scale. Top-down 90-degree view, shadowless lighting. TECHNICAL: 8K, razor-sharp, distortion-free.`; break
       default:
-        return `Professional product photography of a ${garmentDesc}. High quality, 8K resolution.`
+        base = `Professional product photography of a ${garmentDesc}. High quality, 8K resolution.`
     }
+    return base + ` OUTPUT FORMAT: ${ratioMap[pair.aspectRatio] || pair.aspectRatio} aspect ratio.`
   }
 
   // ── Tek pair işle ──
@@ -237,7 +235,7 @@ export default function VtonTool({ addToast }: Props) {
       if (pair.aiProvider === 'gemini') {
         update({ status: 'generating', progress: '🔵 Gemini üretiyor...' })
         const geminiRes = await fetch('/api/vton-generate', { method: 'POST', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ action: 'gemini_generate', prompt, imageUrls, geminiModel: pair.falModel }) }).then(r => r.json())
+          body: JSON.stringify({ action: 'gemini_generate', prompt, imageUrls, geminiModel: pair.falModel, aspectRatio: pair.aspectRatio }) }).then(r => r.json())
         if (!geminiRes.success) throw new Error(geminiRes.error || 'Gemini üretim başarısız')
         const dataUrl = `data:${geminiRes.mimeType};base64,${geminiRes.imageBase64}`
         // Track Gemini cost
@@ -485,6 +483,20 @@ export default function VtonTool({ addToast }: Props) {
               style={{ fontSize: 13, padding: '8px 10px', fontWeight: 600 }}>
               {AI_PROVIDERS.map(p => <option key={p.value} value={p.value}>{p.label}</option>)}
             </select>
+          </div>
+          <div className="form-group" style={{ marginBottom: 12 }}>
+            <label className="form-label" style={{ fontSize: 11 }}>📐 Çıktı Boyutu</label>
+            <div style={{ display: 'flex', gap: 6 }}>
+              {['1:1', '3:4', '4:3', '9:16', '16:9'].map(r => (
+                <button key={r} onClick={() => setOutputSize(r)} style={{
+                  flex: 1, padding: '6px 0', fontSize: 12, fontWeight: 700, borderRadius: 6,
+                  background: outputSize === r ? 'var(--primary)' : 'var(--bg)',
+                  color: outputSize === r ? '#fff' : 'var(--text)',
+                  border: outputSize === r ? '2px solid var(--primary)' : '1px solid var(--border)',
+                  cursor: 'pointer', transition: 'all .15s',
+                }}>{r}</button>
+              ))}
+            </div>
           </div>
           <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'end', marginBottom: 12 }}>
             <div className="form-group" style={{ flex: 1, minWidth: 120 }}>
