@@ -58,11 +58,10 @@ const STEPS = [
   { id: 2, icon: '🖼️', label: 'Görseller' },
   { id: 3, icon: '💰', label: 'Fiyat' },
   { id: 4, icon: '🤖', label: 'AI Enrichment' },
-  { id: 5, icon: '👗', label: 'VTON' },
-  { id: 6, icon: '🎨', label: 'Varyantlar' },
-  { id: 7, icon: '🏷️', label: 'Etiketler' },
-  { id: 8, icon: '🔗', label: 'Handle' },
-  { id: 9, icon: '✅', label: 'Son Kontrol' },
+  { id: 5, icon: '🎨', label: 'Varyantlar' },
+  { id: 6, icon: '🏷️', label: 'Etiketler' },
+  { id: 7, icon: '🔗', label: 'Handle' },
+  { id: 8, icon: '✅', label: 'Son Kontrol' },
 ]
 
 const GARMENT_CATEGORIES = [
@@ -101,6 +100,7 @@ export default function ProductImport({ addToast }: Props) {
   const [scraping, setScraping] = useState(false)
   const [product, setProduct] = useState<ScrapedProduct | null>(null)
   const [needs1688Html, setNeeds1688Html] = useState(false)
+  const [scrapePreview, setScrapePreview] = useState<{ product: ScrapedProduct; selectedImages: boolean[] } | null>(null)
 
   // Step 2 — Images
   const [images, setImages] = useState<ImageItem[]>([])
@@ -132,20 +132,20 @@ export default function ProductImport({ addToast }: Props) {
   const [vtonResults, setVtonResults] = useState<VtonResult[]>([])
   const [vtonRunning, setVtonRunning] = useState(false)
 
-  // Step 6 — Variants
+  // Step 5 — Variants
   const [useVariants, setUseVariants] = useState(false)
   const [variants, setVariants] = useState<VariantItem[]>([])
   const [sizes, setSizes] = useState<string[]>([])
   const [sizeInput, setSizeInput] = useState('')
 
-  // Step 7 — Tags
+  // Step 6 — Tags
   const [tags, setTags] = useState('')
   const [suggestingTags, setSuggestingTags] = useState(false)
 
-  // Step 8 — Handle
+  // Step 7 — Handle
   const [handle, setHandle] = useState('')
 
-  // Step 9 — Push
+  // Step 8 — Push
   const [pushing, setPushing] = useState(false)
   const [pushResult, setPushResult] = useState<any>(null)
 
@@ -155,6 +155,7 @@ export default function ProductImport({ addToast }: Props) {
     setScraping(true)
     setProduct(null)
     setNeeds1688Html(false)
+    setScrapePreview(null)
 
     try {
       const body: any = {}
@@ -177,22 +178,49 @@ export default function ProductImport({ addToast }: Props) {
       if (!data.success) throw new Error(data.error)
 
       const p: ScrapedProduct = data.product
-      setProduct(p)
-      setImages(p.images.map((url: string, i: number) => ({ url, selected: true, order: i })))
-      setSizes([...p.sizes])
-      calculatePrice(p)
-      setHandle(slugify(p.title))
-      setTags(p.tags || '')
-      setEnrichedTitle(p.title)
-      setEnrichedDesc('')
-      setVariants([{ name: p.colors?.[0] || 'Varsayılan', sizes: [...p.sizes], imageIndex: 0 }])
-
-      addToast({ type: 'success', message: `${p.source === 'shopify' ? 'Shopify' : '1688'} ürünü çekildi!` })
+      // Görsel seçim popup'ı aç
+      setScrapePreview({ product: p, selectedImages: p.images.map(() => true) })
     } catch (err: any) {
       addToast({ type: 'error', message: err.message })
     } finally {
       setScraping(false)
     }
+  }
+
+  const confirmScrapeImages = () => {
+    if (!scrapePreview) return
+    const p = scrapePreview.product
+    const filteredImages = p.images.filter((_, i) => scrapePreview.selectedImages[i])
+
+    setProduct({ ...p, images: filteredImages })
+    setImages(filteredImages.map((url: string, i: number) => ({ url, selected: true, order: i })))
+    setSizes([...p.sizes])
+    calculatePrice(p)
+    setHandle(slugify(p.title))
+    setTags(p.tags || '')
+    setEnrichedTitle(p.title)
+    setEnrichedDesc('')
+    setVariants([{ name: p.colors?.[0] || 'Varsayılan', sizes: [...p.sizes], imageIndex: 0 }])
+    setScrapePreview(null)
+    addToast({ type: 'success', message: `${p.source === 'shopify' ? 'Shopify' : '1688'} ürünü çekildi! (${filteredImages.length} görsel)` })
+  }
+
+  const toggleScrapePreviewImage = (idx: number) => {
+    if (!scrapePreview) return
+    setScrapePreview((prev) => {
+      if (!prev) return null
+      const sel = [...prev.selectedImages]
+      sel[idx] = !sel[idx]
+      return { ...prev, selectedImages: sel }
+    })
+  }
+
+  const selectAllScrapeImages = (val: boolean) => {
+    if (!scrapePreview) return
+    setScrapePreview((prev) => {
+      if (!prev) return null
+      return { ...prev, selectedImages: prev.selectedImages.map(() => val) }
+    })
   }
 
   const calculatePrice = (p: ScrapedProduct) => {
@@ -697,6 +725,69 @@ export default function ProductImport({ addToast }: Props) {
               </div>
             )}
 
+            {/* ── Görsel Seçim Popup ── */}
+            {scrapePreview && (
+              <div style={{
+                position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,
+                background: 'rgba(0,0,0,0.7)', zIndex: 9999,
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                padding: 20,
+              }}>
+                <div style={{
+                  background: 'var(--bg)', borderRadius: 16, padding: 24,
+                  maxWidth: 900, width: '100%', maxHeight: '90vh', overflow: 'auto',
+                  boxShadow: '0 20px 60px rgba(0,0,0,0.5)',
+                }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+                    <h3 style={{ margin: 0, fontSize: 18 }}>🖼️ Görselleri Seçin ({scrapePreview.selectedImages.filter(Boolean).length}/{scrapePreview.product.images.length})</h3>
+                    <div style={{ display: 'flex', gap: 8 }}>
+                      <button className="btn btn-sm" onClick={() => selectAllScrapeImages(true)}>Tümünü Seç</button>
+                      <button className="btn btn-sm" onClick={() => selectAllScrapeImages(false)}>Tümünü Kaldır</button>
+                    </div>
+                  </div>
+
+                  <p style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 16 }}>
+                    <strong>{scrapePreview.product.title}</strong> — Import etmek istediğiniz görselleri seçin
+                  </p>
+
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(140px, 1fr))', gap: 10, marginBottom: 20 }}>
+                    {scrapePreview.product.images.map((imgUrl, idx) => (
+                      <div key={idx} onClick={() => toggleScrapePreviewImage(idx)}
+                        style={{
+                          border: scrapePreview.selectedImages[idx]
+                            ? '3px solid var(--success)' : '2px solid var(--border)',
+                          borderRadius: 8, overflow: 'hidden', cursor: 'pointer',
+                          opacity: scrapePreview.selectedImages[idx] ? 1 : 0.35,
+                          transition: 'all .2s', position: 'relative',
+                        }}>
+                        <img src={imgUrl} alt="" style={{ width: '100%', height: 180, objectFit: 'cover' }} />
+                        <div style={{
+                          position: 'absolute', top: 6, right: 6,
+                          width: 24, height: 24, borderRadius: '50%',
+                          background: scrapePreview.selectedImages[idx] ? 'var(--success)' : 'rgba(0,0,0,0.5)',
+                          color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center',
+                          fontSize: 14, fontWeight: 700,
+                        }}>
+                          {scrapePreview.selectedImages[idx] ? '✓' : ''}
+                        </div>
+                        <div style={{ padding: '4px 8px', fontSize: 10, color: 'var(--text-muted)', textAlign: 'center' }}>
+                          #{idx + 1}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+
+                  <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+                    <button className="btn" onClick={() => setScrapePreview(null)}>İptal</button>
+                    <button className="btn btn-primary" onClick={confirmScrapeImages}
+                      disabled={scrapePreview.selectedImages.filter(Boolean).length === 0}>
+                      ✅ Seçilenleri Import Et ({scrapePreview.selectedImages.filter(Boolean).length})
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
+
             {product && (
               <div style={{ marginTop: 20 }}>
                 <div style={{ display: 'flex', gap: 16, alignItems: 'flex-start' }}>
@@ -853,15 +944,15 @@ export default function ProductImport({ addToast }: Props) {
 
                 <div style={{ display: 'flex', gap: 8 }}>
                   <button className="btn" onClick={prev}>← Geri</button>
-                  <button className="btn btn-primary" onClick={next}>Devam → VTON</button>
+                  <button className="btn btn-primary" onClick={next}>Devam → Varyantlar</button>
                 </div>
               </div>
             )}
           </div>
         )}
 
-        {/* ═══ STEP 5: VTON ═══ */}
-        {step === 5 && product && (
+        {/* ═══ STEP 5: VTON (PASIF) ═══ */}
+        {false && step === 5 && product && (
           <div className="card">
             <div className="card-title">👗 Virtual Try-On (VTON)</div>
 
@@ -1075,8 +1166,8 @@ export default function ProductImport({ addToast }: Props) {
           </div>
         )}
 
-        {/* ═══ STEP 6: Variants ═══ */}
-        {step === 6 && product && (
+        {/* ═══ STEP 5: Variants ═══ */}
+        {step === 5 && product && (
           <div className="card">
             <div className="card-title">🎨 Varyantlar</div>
             <div className="form-group" style={{ marginBottom: 16 }}>
@@ -1128,8 +1219,8 @@ export default function ProductImport({ addToast }: Props) {
           </div>
         )}
 
-        {/* ═══ STEP 7: Tags ═══ */}
-        {step === 7 && (
+        {/* ═══ STEP 6: Tags ═══ */}
+        {step === 6 && (
           <div className="card">
             <div className="card-title">🏷️ Etiketler</div>
             <div className="form-group" style={{ marginBottom: 16 }}>
@@ -1154,8 +1245,8 @@ export default function ProductImport({ addToast }: Props) {
           </div>
         )}
 
-        {/* ═══ STEP 8: Handle ═══ */}
-        {step === 8 && (
+        {/* ═══ STEP 7: Handle ═══ */}
+        {step === 7 && (
           <div className="card">
             <div className="card-title">🔗 URL Handle</div>
             <div className="form-group" style={{ marginBottom: 16 }}>
@@ -1174,8 +1265,8 @@ export default function ProductImport({ addToast }: Props) {
           </div>
         )}
 
-        {/* ═══ STEP 9: Final Review ═══ */}
-        {step === 9 && product && (
+        {/* ═══ STEP 8: Final Review ═══ */}
+        {step === 8 && product && (
           <div className="card">
             <div className="card-title">✅ Son Kontrol</div>
 
@@ -1185,10 +1276,9 @@ export default function ProductImport({ addToast }: Props) {
                 { label: '🖼️ Görseller', value: `${selectedImages.length} adet`, step: 2 },
                 { label: '💰 Fiyat', value: `₺${sellingPrice} (karş: ₺${comparePrice})`, step: 3 },
                 { label: '🤖 Enrichment', value: enrichment ? '✅ Yapıldı' : '⚠️ Yapılmadı', step: 4 },
-                { label: '👗 VTON', value: vtonResults.length > 0 ? `${vtonResults.filter((r) => r.selected).length}/${vtonResults.length} görsel seçili` : 'Yapılmadı', step: 5 },
-                { label: '🎨 Varyantlar', value: useVariants ? `${variants.length} varyant × ${sizes.join(',')}` : `${sizes.join(', ')}`, step: 6 },
-                { label: '🏷️ Etiketler', value: tags || '(boş)', step: 7 },
-                { label: '🔗 Handle', value: handle, step: 8 },
+                { label: '🎨 Varyantlar', value: useVariants ? `${variants.length} varyant × ${sizes.join(',')}` : `${sizes.join(', ')}`, step: 5 },
+                { label: '🏷️ Etiketler', value: tags || '(boş)', step: 6 },
+                { label: '🔗 Handle', value: handle, step: 7 },
               ].map((row) => (
                 <div key={row.label} style={{
                   display: 'flex', justifyContent: 'space-between', alignItems: 'center',
