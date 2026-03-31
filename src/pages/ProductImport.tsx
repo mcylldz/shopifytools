@@ -44,11 +44,11 @@ interface VtonResult {
 const STEPS = [
   { id: 1, icon: '🔗', label: 'Scrape' },
   { id: 2, icon: '🖼️', label: 'Görseller' },
-  { id: 3, icon: '🎨', label: 'Varyantlar' },
-  { id: 4, icon: '💰', label: 'Fiyat' },
-  { id: 5, icon: '🏷️', label: 'Etiketler' },
-  { id: 6, icon: '🤖', label: 'AI Enrichment' },
-  { id: 7, icon: '👗', label: 'VTON' },
+  { id: 3, icon: '💰', label: 'Fiyat' },
+  { id: 4, icon: '🤖', label: 'AI Enrichment' },
+  { id: 5, icon: '👗', label: 'VTON' },
+  { id: 6, icon: '🎨', label: 'Varyantlar' },
+  { id: 7, icon: '🏷️', label: 'Etiketler' },
   { id: 8, icon: '🔗', label: 'Handle' },
   { id: 9, icon: '✅', label: 'Son Kontrol' },
 ]
@@ -94,28 +94,19 @@ export default function ProductImport({ addToast }: Props) {
   const [images, setImages] = useState<ImageItem[]>([])
   const fileRef = useRef<HTMLInputElement>(null)
 
-  // Step 3 — Variants
-  const [useVariants, setUseVariants] = useState(false)
-  const [variants, setVariants] = useState<VariantItem[]>([])
-  const [sizes, setSizes] = useState<string[]>([])
-  const [sizeInput, setSizeInput] = useState('')
-
-  // Step 4 — Pricing
+  // Step 3 — Pricing
   const [sellingPrice, setSellingPrice] = useState(0)
   const [comparePrice, setComparePrice] = useState(0)
   const [discountPct, setDiscountPct] = useState(0)
 
-  // Step 5 — Tags
-  const [tags, setTags] = useState('')
-
-  // Step 6 — Enrichment
+  // Step 4 — Enrichment
   const [enrichment, setEnrichment] = useState<any>(null)
   const [enriching, setEnriching] = useState(false)
   const [enrichedTitle, setEnrichedTitle] = useState('')
   const [enrichedDesc, setEnrichedDesc] = useState('')
   const [visionImageIdx, setVisionImageIdx] = useState(0)
 
-  // Step 7 — VTON
+  // Step 5 — VTON
   const [vtonMode, setVtonMode] = useState<'standard' | 'ghost' | 'fabric'>('standard')
   const [garmentCategory, setGarmentCategory] = useState('top')
   const [fabricInfo, setFabricInfo] = useState('')
@@ -128,6 +119,16 @@ export default function ProductImport({ addToast }: Props) {
   const [vtonGenerating, setVtonGenerating] = useState(false)
   const [vtonResults, setVtonResults] = useState<VtonResult[]>([])
   const [vtonProgress, setVtonProgress] = useState('')
+
+  // Step 6 — Variants
+  const [useVariants, setUseVariants] = useState(false)
+  const [variants, setVariants] = useState<VariantItem[]>([])
+  const [sizes, setSizes] = useState<string[]>([])
+  const [sizeInput, setSizeInput] = useState('')
+
+  // Step 7 — Tags
+  const [tags, setTags] = useState('')
+  const [suggestingTags, setSuggestingTags] = useState(false)
 
   // Step 8 — Handle
   const [handle, setHandle] = useState('')
@@ -403,7 +404,7 @@ export default function ProductImport({ addToast }: Props) {
       }
       // Fabric mode: analiz yok
 
-      // FAL AI görsel üret
+      // FAL AI görsel üret — submit only
       setVtonProgress('🎨 Görsel üretiliyor (FAL AI)...')
 
       const imageUrls = vtonMode === 'standard'
@@ -428,7 +429,8 @@ export default function ProductImport({ addToast }: Props) {
       const genData = await genRes.json()
       if (!genData.success) throw new Error(genData.error)
 
-      if (genData.images?.length > 0) {
+      // Eğer sync dönüyorsa (images direkt var)
+      if (genData.status === 'COMPLETED' && genData.images?.length > 0) {
         const newResults: VtonResult[] = genData.images.map((img: any, idx: number) => ({
           id: `vton_${Date.now()}_${idx}`,
           mode: vtonMode,
@@ -437,7 +439,48 @@ export default function ProductImport({ addToast }: Props) {
           selected: false,
         }))
         setVtonResults((prev) => [...newResults, ...prev])
-        addToast({ type: 'success', message: `✅ VTON görseli üretildi!` })
+        addToast({ type: 'success', message: '✅ VTON görseli üretildi!' })
+      } else if (genData.requestId) {
+        // Async — frontend polling (5sn aralık, 5dk timeout)
+        setVtonProgress('⏳ Sonuç bekleniyor (5sn aralıklarla kontrol)...')
+        const maxWait = 5 * 60 * 1000 // 5 dakika
+        const interval = 5000 // 5 saniye
+        const start = Date.now()
+
+        while (Date.now() - start < maxWait) {
+          await new Promise((r) => setTimeout(r, interval))
+          const elapsed = Math.round((Date.now() - start) / 1000)
+          setVtonProgress(`⏳ Sonuç bekleniyor... (${elapsed}s)`)
+
+          try {
+            const pollRes = await fetch('/api/vton-generate', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ action: 'status', requestId: genData.requestId }),
+            })
+            const pollData = await pollRes.json()
+
+            if (pollData.status === 'COMPLETED' && pollData.images?.length > 0) {
+              const newResults: VtonResult[] = pollData.images.map((img: any, idx: number) => ({
+                id: `vton_${Date.now()}_${idx}`,
+                mode: vtonMode,
+                imageUrl: img.url,
+                prompt: vtonMode,
+                selected: false,
+              }))
+              setVtonResults((prev) => [...newResults, ...prev])
+              addToast({ type: 'success', message: '✅ VTON görseli üretildi!' })
+              break
+            }
+
+            if (pollData.status === 'FAILED') {
+              throw new Error('FAL AI üretim başarısız oldu')
+            }
+          } catch (pollErr: any) {
+            // Poll hatası — sadece logla, döngüye devam et
+            console.warn('Poll error:', pollErr.message)
+          }
+        }
       } else {
         addToast({ type: 'info', message: 'Görsel üretilemedi' })
       }
@@ -468,6 +511,46 @@ export default function ProductImport({ addToast }: Props) {
       return [...prev, ...newImages]
     })
     addToast({ type: 'success', message: `${selected.length} VTON görseli eklendi` })
+  }
+
+  // ────────────────── Step 7: Tag Suggestion ──────────────────
+  const handleSuggestTags = async () => {
+    if (!product) return
+    setSuggestingTags(true)
+
+    try {
+      const selImgs = images.filter((i) => i.selected).sort((a, b) => a.order - b.order)
+      const imgUrl = selImgs[0]?.url
+
+      const res = await fetch('/api/suggest-tags', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          imageUrl: imgUrl?.startsWith('http') ? imgUrl : undefined,
+          title: enrichedTitle || product.title,
+          description: enrichedDesc || product.description,
+        }),
+      })
+      const data = await res.json()
+      if (!data.success) throw new Error(data.error)
+
+      // 1688 ise "1688 online" tag'ını ekle
+      let allTags = [...(data.tags || [])]
+      if (product.source === '1688' && !allTags.includes('1688 online')) {
+        allTags.push('1688 online')
+      }
+
+      // Mevcut taglarla birleştir
+      const existing = tags.split(',').map((t) => t.trim().toLowerCase()).filter(Boolean)
+      const merged = [...new Set([...existing, ...allTags])]
+      setTags(merged.join(', '))
+
+      addToast({ type: 'success', message: `🏷️ ${data.tags.length} tag önerildi` })
+    } catch (err: any) {
+      addToast({ type: 'error', message: err.message })
+    } finally {
+      setSuggestingTags(false)
+    }
   }
 
   // ────────────────── Step 9: Push ──────────────────
@@ -658,80 +741,13 @@ export default function ProductImport({ addToast }: Props) {
 
             <div style={{ display: 'flex', gap: 8 }}>
               <button className="btn" onClick={prev}>← Geri</button>
-              <button className="btn btn-primary" onClick={next}>Devam → Varyantlar</button>
+              <button className="btn btn-primary" onClick={next}>Devam → Fiyat</button>
             </div>
           </div>
         )}
 
-        {/* ═══ STEP 3: Variants ═══ */}
+        {/* ═══ STEP 3: Pricing ═══ */}
         {step === 3 && product && (
-          <div className="card">
-            <div className="card-title">🎨 Varyantlar</div>
-
-            <div className="form-group" style={{ marginBottom: 16 }}>
-              <label className="form-label">Bedenler</label>
-              <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 8 }}>
-                {sizes.map((s) => (
-                  <span key={s} className="tag-chip">
-                    {s} <button onClick={() => removeSize(s)}>×</button>
-                  </span>
-                ))}
-              </div>
-              <div style={{ display: 'flex', gap: 8 }}>
-                <input className="form-input" placeholder="Beden ekle (ör: XS)" value={sizeInput}
-                  onChange={(e) => setSizeInput(e.target.value)}
-                  onKeyDown={(e) => e.key === 'Enter' && (e.preventDefault(), addSize())}
-                  style={{ width: 120 }} />
-                <button className="btn btn-sm" onClick={addSize}>Ekle</button>
-              </div>
-            </div>
-
-            <div className="form-group" style={{ marginBottom: 16 }}>
-              <label className="checkbox-row">
-                <input type="checkbox" checked={useVariants} onChange={(e) => setUseVariants(e.target.checked)} />
-                Renk / model varyantları kullan
-              </label>
-            </div>
-
-            {useVariants && (
-              <>
-                {variants.map((v, vIdx) => (
-                  <div key={vIdx} style={{ border: '1px solid var(--border)', borderRadius: 8, padding: 12, marginBottom: 12 }}>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
-                      <input className="form-input" value={v.name}
-                        onChange={(e) => setVariants((prev) => prev.map((item, i) =>
-                          i === vIdx ? { ...item, name: e.target.value } : item
-                        ))}
-                        style={{ width: 200, fontWeight: 600 }} />
-                      <button className="btn btn-sm" style={{ background: 'var(--danger)', color: '#fff' }}
-                        onClick={() => removeVariant(vIdx)}>Sil</button>
-                    </div>
-                    <label className="form-label" style={{ fontSize: 11 }}>Varyant Görseli</label>
-                    <div style={{ display: 'flex', gap: 6, overflowX: 'auto', paddingBottom: 8 }}>
-                      {selectedImages.map((img, imgIdx) => (
-                        <img key={imgIdx} src={img.url} alt=""
-                          onClick={() => setVariantImage(vIdx, imgIdx)}
-                          style={{
-                            width: 60, height: 80, objectFit: 'cover', borderRadius: 6, cursor: 'pointer', flexShrink: 0,
-                            border: v.imageIndex === imgIdx ? '3px solid var(--primary)' : '2px solid var(--border)',
-                          }} />
-                      ))}
-                    </div>
-                  </div>
-                ))}
-                <button className="btn" onClick={addVariant} style={{ marginBottom: 16 }}>+ Varyant Ekle</button>
-              </>
-            )}
-
-            <div style={{ display: 'flex', gap: 8 }}>
-              <button className="btn" onClick={prev}>← Geri</button>
-              <button className="btn btn-primary" onClick={next}>Devam → Fiyatlandırma</button>
-            </div>
-          </div>
-        )}
-
-        {/* ═══ STEP 4: Pricing ═══ */}
-        {step === 4 && product && (
           <div className="card">
             <div className="card-title">💰 Fiyatlandırma</div>
 
@@ -774,36 +790,13 @@ export default function ProductImport({ addToast }: Props) {
 
             <div style={{ display: 'flex', gap: 8 }}>
               <button className="btn" onClick={prev}>← Geri</button>
-              <button className="btn btn-primary" onClick={next}>Devam → Etiketler</button>
-            </div>
-          </div>
-        )}
-
-        {/* ═══ STEP 5: Tags ═══ */}
-        {step === 5 && (
-          <div className="card">
-            <div className="card-title">🏷️ Etiketler</div>
-            <div className="form-group" style={{ marginBottom: 16 }}>
-              <label className="form-label">Etiketler (virgülle ayırın)</label>
-              <textarea className="form-input" rows={3} value={tags}
-                onChange={(e) => setTags(e.target.value)} placeholder="elbise, siyah, kadın, yaz" />
-            </div>
-            {tags && (
-              <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 16 }}>
-                {tags.split(',').map((t) => t.trim()).filter(Boolean).map((t) => (
-                  <span key={t} className="tag-chip">{t}</span>
-                ))}
-              </div>
-            )}
-            <div style={{ display: 'flex', gap: 8 }}>
-              <button className="btn" onClick={prev}>← Geri</button>
               <button className="btn btn-primary" onClick={next}>Devam → AI Enrichment</button>
             </div>
           </div>
         )}
 
-        {/* ═══ STEP 6: AI Enrichment ═══ */}
-        {step === 6 && product && (
+        {/* ═══ STEP 4: AI Enrichment ═══ */}
+        {step === 4 && product && (
           <div className="card">
             <div className="card-title">🤖 AI Enrichment</div>
 
@@ -856,8 +849,8 @@ export default function ProductImport({ addToast }: Props) {
           </div>
         )}
 
-        {/* ═══ STEP 7: VTON ═══ */}
-        {step === 7 && product && (
+        {/* ═══ STEP 5: VTON ═══ */}
+        {step === 5 && product && (
           <div className="card">
             <div className="card-title">👗 Virtual Try-On (VTON)</div>
 
@@ -1008,6 +1001,85 @@ export default function ProductImport({ addToast }: Props) {
 
             <div style={{ display: 'flex', gap: 8 }}>
               <button className="btn" onClick={prev}>← Geri</button>
+              <button className="btn btn-primary" onClick={next}>Devam → Varyantlar</button>
+            </div>
+          </div>
+        )}
+
+        {/* ═══ STEP 6: Variants ═══ */}
+        {step === 6 && product && (
+          <div className="card">
+            <div className="card-title">🎨 Varyantlar</div>
+            <div className="form-group" style={{ marginBottom: 16 }}>
+              <label className="form-label">Bedenler</label>
+              <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 8 }}>
+                {sizes.map((s) => (<span key={s} className="tag-chip">{s} <button onClick={() => removeSize(s)}>×</button></span>))}
+              </div>
+              <div style={{ display: 'flex', gap: 8 }}>
+                <input className="form-input" placeholder="Beden ekle (ör: XS)" value={sizeInput}
+                  onChange={(e) => setSizeInput(e.target.value)}
+                  onKeyDown={(e) => e.key === 'Enter' && (e.preventDefault(), addSize())}
+                  style={{ width: 120 }} />
+                <button className="btn btn-sm" onClick={addSize}>Ekle</button>
+              </div>
+            </div>
+            <div className="form-group" style={{ marginBottom: 16 }}>
+              <label className="checkbox-row">
+                <input type="checkbox" checked={useVariants} onChange={(e) => setUseVariants(e.target.checked)} />
+                Renk / model varyantları kullan
+              </label>
+            </div>
+            {useVariants && (
+              <>
+                {variants.map((v, vIdx) => (
+                  <div key={vIdx} style={{ border: '1px solid var(--border)', borderRadius: 8, padding: 12, marginBottom: 12 }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+                      <input className="form-input" value={v.name}
+                        onChange={(e) => setVariants((prev) => prev.map((item, i) => i === vIdx ? { ...item, name: e.target.value } : item))}
+                        style={{ width: 200, fontWeight: 600 }} />
+                      <button className="btn btn-sm" style={{ background: 'var(--danger)', color: '#fff' }} onClick={() => removeVariant(vIdx)}>Sil</button>
+                    </div>
+                    <label className="form-label" style={{ fontSize: 11 }}>Varyant Görseli</label>
+                    <div style={{ display: 'flex', gap: 6, overflowX: 'auto', paddingBottom: 8 }}>
+                      {selectedImages.map((img, imgIdx) => (
+                        <img key={imgIdx} src={img.url} alt="" onClick={() => setVariantImage(vIdx, imgIdx)}
+                          style={{ width: 60, height: 80, objectFit: 'cover', borderRadius: 6, cursor: 'pointer', flexShrink: 0,
+                            border: v.imageIndex === imgIdx ? '3px solid var(--primary)' : '2px solid var(--border)' }} />
+                      ))}
+                    </div>
+                  </div>
+                ))}
+                <button className="btn" onClick={addVariant} style={{ marginBottom: 16 }}>+ Varyant Ekle</button>
+              </>
+            )}
+            <div style={{ display: 'flex', gap: 8 }}>
+              <button className="btn" onClick={prev}>← Geri</button>
+              <button className="btn btn-primary" onClick={next}>Devam → Etiketler</button>
+            </div>
+          </div>
+        )}
+
+        {/* ═══ STEP 7: Tags ═══ */}
+        {step === 7 && (
+          <div className="card">
+            <div className="card-title">🏷️ Etiketler</div>
+            <div className="form-group" style={{ marginBottom: 16 }}>
+              <label className="form-label">Etiketler (virgülle ayırın)</label>
+              <textarea className="form-input" rows={3} value={tags}
+                onChange={(e) => setTags(e.target.value)} placeholder="elbise, siyah, kadın, yaz" />
+            </div>
+            <button className="btn" onClick={handleSuggestTags} disabled={suggestingTags} style={{ marginBottom: 12 }}>
+              {suggestingTags ? <><span className="spinner" /> AI öneriliyor...</> : '🤖 AI ile Tag Öner'}
+            </button>
+            {tags && (
+              <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 16 }}>
+                {tags.split(',').map((t) => t.trim()).filter(Boolean).map((t) => (
+                  <span key={t} className="tag-chip">{t}</span>
+                ))}
+              </div>
+            )}
+            <div style={{ display: 'flex', gap: 8 }}>
+              <button className="btn" onClick={prev}>← Geri</button>
               <button className="btn btn-primary" onClick={next}>Devam → Handle</button>
             </div>
           </div>
@@ -1040,13 +1112,13 @@ export default function ProductImport({ addToast }: Props) {
 
             <div style={{ display: 'grid', gap: 10, marginBottom: 20 }}>
               {[
-                { label: '📝 Başlık', value: enrichedTitle || product.title, step: 6 },
+                { label: '📝 Başlık', value: enrichedTitle || product.title, step: 4 },
                 { label: '🖼️ Görseller', value: `${selectedImages.length} adet`, step: 2 },
-                { label: '🎨 Varyantlar', value: useVariants ? `${variants.length} varyant × ${sizes.join(',')}` : `${sizes.join(', ')}`, step: 3 },
-                { label: '💰 Fiyat', value: `₺${sellingPrice} (karş: ₺${comparePrice})`, step: 4 },
-                { label: '🏷️ Etiketler', value: tags || '(boş)', step: 5 },
-                { label: '🤖 Enrichment', value: enrichment ? '✅ Yapıldı' : '⚠️ Yapılmadı', step: 6 },
-                { label: '👗 VTON', value: vtonResults.length > 0 ? `${vtonResults.filter((r) => r.selected).length}/${vtonResults.length} görsel seçili` : 'Yapılmadı', step: 7 },
+                { label: '💰 Fiyat', value: `₺${sellingPrice} (karş: ₺${comparePrice})`, step: 3 },
+                { label: '🤖 Enrichment', value: enrichment ? '✅ Yapıldı' : '⚠️ Yapılmadı', step: 4 },
+                { label: '👗 VTON', value: vtonResults.length > 0 ? `${vtonResults.filter((r) => r.selected).length}/${vtonResults.length} görsel seçili` : 'Yapılmadı', step: 5 },
+                { label: '🎨 Varyantlar', value: useVariants ? `${variants.length} varyant × ${sizes.join(',')}` : `${sizes.join(', ')}`, step: 6 },
+                { label: '🏷️ Etiketler', value: tags || '(boş)', step: 7 },
                 { label: '🔗 Handle', value: handle, step: 8 },
               ].map((row) => (
                 <div key={row.label} style={{

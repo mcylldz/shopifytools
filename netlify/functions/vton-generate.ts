@@ -7,7 +7,6 @@ const FAL_BASE = `https://queue.fal.run/${FAL_MODEL}`
 // ──────────────── Prompt Templates ────────────────
 
 export const FINAL_PROMPTS = {
-  // Standard VTON — combined prompt
   standard: (modelDesc: string, garmentDesc: string, productTitle: string, category: string) =>
     `Professional editorial fashion photography. The exact same model from image 1 wearing a ${garmentDesc}. The model description: ${modelDesc}.
 
@@ -25,11 +24,9 @@ CONTEXT:
 - Product Name: ${productTitle}
 - Product Type: ${category}`,
 
-  // Ghost Mode prompt
   ghost: (garmentDesc: string) =>
     `Professional studio product photography of a ${garmentDesc}. Invisible ghost mannequin effect: The garment is shown worn by an invisible form, creating a realistic 3D shape with natural volume, folds, and drape, as if floating. Details: Show only the clean inside fabric texture through the neck opening. Background: Pure, seamless flat white studio background. Lighting: Soft, even studio lighting to highlight fabric texture. View: Front view, centered. No: No visible mannequin, no hangers, no human models, no neck labels, no brand tags.`,
 
-  // Fabric Mode prompt
   fabric: (fabricInfo?: string) =>
     `Generate a high-resolution fabric texture close-up for a Shopify product page. Use the provided product image${fabricInfo ? ` and fabric information (${fabricInfo})` : ''} to recreate the fabric with natural realism.
 
@@ -40,68 +37,6 @@ The entire frame must remain fully sharp: no blur, no depth of field, no soft gr
 Lighting should be neutral and evenly distributed to highlight the weave pattern, fiber detail, and the three-dimensional surface without creating harsh shadows. Color accuracy and fabric structure must stay true to the original product.
 
 Output should look like a premium e-commerce textile macro: realistic micro-folds, natural volume, full-frame sharpness, neutral lighting, and trustworthy material representation.`,
-}
-
-// ──────────────── FAL AI Queue ────────────────
-
-async function falSubmit(prompt: string, imageUrls: string[], resolution = '2K', aspectRatio = '9:16') {
-  const res = await fetch(FAL_BASE, {
-    method: 'POST',
-    headers: {
-      'Authorization': `Key ${FAL_KEY}`,
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({
-      prompt,
-      image_urls: imageUrls,
-      resolution,
-      aspect_ratio: aspectRatio,
-      num_images: 1,
-      output_format: 'png',
-      safety_tolerance: '6',
-      limit_generations: true,
-    }),
-  })
-
-  if (!res.ok) {
-    const errText = await res.text()
-    throw new Error(`FAL submit failed (${res.status}): ${errText}`)
-  }
-
-  return await res.json()
-}
-
-async function falStatus(requestId: string) {
-  const res = await fetch(`${FAL_BASE}/requests/${requestId}/status`, {
-    headers: { 'Authorization': `Key ${FAL_KEY}` },
-  })
-  if (!res.ok) throw new Error(`FAL status failed: ${res.status}`)
-  return await res.json()
-}
-
-async function falResult(requestId: string) {
-  const res = await fetch(`${FAL_BASE}/requests/${requestId}`, {
-    headers: { 'Authorization': `Key ${FAL_KEY}` },
-  })
-  if (!res.ok) throw new Error(`FAL result failed: ${res.status}`)
-  return await res.json()
-}
-
-// Poll with timeout
-async function falPoll(requestId: string, maxWaitMs = 120000): Promise<any> {
-  const start = Date.now()
-  while (Date.now() - start < maxWaitMs) {
-    const status = await falStatus(requestId)
-    if (status.status === 'COMPLETED') {
-      return await falResult(requestId)
-    }
-    if (status.status === 'FAILED') {
-      throw new Error(`FAL generation failed: ${JSON.stringify(status)}`)
-    }
-    // Wait 3 seconds
-    await new Promise((r) => setTimeout(r, 3000))
-  }
-  throw new Error('FAL generation timeout (2 dakika)')
 }
 
 export const handler: Handler = async (event) => {
@@ -115,17 +50,81 @@ export const handler: Handler = async (event) => {
 
   try {
     const {
-      mode,           // 'standard' | 'ghost' | 'fabric'
-      modelDesc,      // model description (from vton-analyze)
-      garmentDesc,    // garment description (from vton-analyze)
-      productTitle,   // ürün adı
-      garmentCategory, // kategori
-      fabricInfo,     // opsiyonel kumaş bilgisi
-      imageUrls,      // referans görseller [modelUrl, garmentUrl] veya [garmentUrl]
-      resolution,     // '1K' | '2K' | '4K'
-      aspectRatio,    // '9:16' | '1:1' etc
+      mode, modelDesc, garmentDesc, productTitle, garmentCategory,
+      fabricInfo, imageUrls, resolution, aspectRatio,
+      // Polling mode: requestId varsa sonucu getir
+      action, requestId,
     } = JSON.parse(event.body || '{}')
 
+    // ── ACTION: STATUS — Sonucu kontrol et ──
+    if (action === 'status' && requestId) {
+      const statusRes = await fetch(`${FAL_BASE}/requests/${requestId}/status`, {
+        method: 'GET',
+        headers: { 'Authorization': `Key ${FAL_KEY}` },
+      })
+
+      if (!statusRes.ok) {
+        // Bazı FAL modelleri status endpoint'i yerine doğrudan result döner
+        // Result endpoint'i dene
+        const resultRes = await fetch(`${FAL_BASE}/requests/${requestId}`, {
+          method: 'GET',
+          headers: { 'Authorization': `Key ${FAL_KEY}` },
+        })
+
+        if (resultRes.ok) {
+          const result = await resultRes.json()
+          return {
+            statusCode: 200,
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              success: true,
+              status: 'COMPLETED',
+              images: result.images || [],
+              description: result.description || '',
+            }),
+          }
+        }
+
+        return {
+          statusCode: 200,
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ success: true, status: 'IN_PROGRESS' }),
+        }
+      }
+
+      const statusData = await statusRes.json()
+
+      if (statusData.status === 'COMPLETED') {
+        // Sonucu getir
+        const resultRes = await fetch(`${FAL_BASE}/requests/${requestId}`, {
+          method: 'GET',
+          headers: { 'Authorization': `Key ${FAL_KEY}` },
+        })
+        const result = await resultRes.json()
+
+        return {
+          statusCode: 200,
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            success: true,
+            status: 'COMPLETED',
+            images: result.images || [],
+            description: result.description || '',
+          }),
+        }
+      }
+
+      return {
+        statusCode: 200,
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          success: true,
+          status: statusData.status || 'IN_PROGRESS',
+        }),
+      }
+    }
+
+    // ── ACTION: SUBMIT — Job gönder ──
     let prompt: string
     switch (mode) {
       case 'standard':
@@ -150,41 +149,58 @@ export const handler: Handler = async (event) => {
       throw new Error('En az bir referans görsel URL gerekli')
     }
 
-    console.log(`[vton-generate] Mode: ${mode}, Images: ${imageUrls.length}, Resolution: ${resolution || '2K'}`)
-    console.log(`[vton-generate] Prompt: ${prompt.substring(0, 150)}...`)
+    console.log(`[vton-generate] Mode: ${mode}, Images: ${imageUrls.length}`)
 
-    // Submit to FAL AI
-    const submitResult = await falSubmit(prompt, imageUrls, resolution || '2K', aspectRatio || '9:16')
-    const requestId = submitResult.request_id
+    const submitRes = await fetch(FAL_BASE, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Key ${FAL_KEY}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        prompt,
+        image_urls: imageUrls,
+        resolution: resolution || '2K',
+        aspect_ratio: aspectRatio || '9:16',
+        num_images: 1,
+        output_format: 'png',
+        safety_tolerance: '6',
+        limit_generations: true,
+      }),
+    })
 
-    if (!requestId) {
-      // Sync mode — result returned directly
+    if (!submitRes.ok) {
+      const errText = await submitRes.text()
+      throw new Error(`FAL submit failed (${submitRes.status}): ${errText}`)
+    }
+
+    const submitData = await submitRes.json()
+
+    // FAL bazen syncron dönüyor (images direkt result'ta)
+    if (submitData.images && submitData.images.length > 0) {
       return {
         statusCode: 200,
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           success: true,
-          images: submitResult.images || [],
-          description: submitResult.description || '',
+          status: 'COMPLETED',
+          images: submitData.images,
+          description: submitData.description || '',
         }),
       }
     }
 
-    console.log(`[vton-generate] Submitted, request_id: ${requestId}`)
-
-    // Poll for result
-    const result = await falPoll(requestId)
-
-    console.log(`[vton-generate] ✅ Completed, ${result.images?.length || 0} images`)
+    // Async — request_id dön, frontend poll edecek
+    const rid = submitData.request_id
+    console.log(`[vton-generate] Submitted, request_id: ${rid}`)
 
     return {
       statusCode: 200,
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         success: true,
-        images: result.images || [],
-        description: result.description || '',
-        requestId,
+        status: 'QUEUED',
+        requestId: rid,
       }),
     }
   } catch (err: any) {
