@@ -99,19 +99,25 @@ export const handler: Handler = async (event) => {
       // Build parts: text prompt + image URLs
       const parts: any[] = [{ text: prompt }]
 
-      // Fetch images and convert to inline data
+      // Fetch images and convert to inline data (HTTP URL veya data URL)
       for (const imgUrl of (imageUrls || [])) {
         try {
-          const imgRes = await fetch(imgUrl)
-          if (!imgRes.ok) continue
-          const buffer = await imgRes.arrayBuffer()
-          const base64 = Buffer.from(buffer).toString('base64')
-          const mimeType = imgRes.headers.get('content-type') || 'image/jpeg'
-          parts.push({
-            inline_data: { mime_type: mimeType, data: base64 }
-          })
+          if (imgUrl.startsWith('data:')) {
+            // Kırpılmış görsel (data URL) — direkt parse et
+            const match = imgUrl.match(/^data:(image\/\w+);base64,(.+)$/)
+            if (match) {
+              parts.push({ inline_data: { mime_type: match[1], data: match[2] } })
+            }
+          } else {
+            const imgRes = await fetch(imgUrl)
+            if (!imgRes.ok) continue
+            const buffer = await imgRes.arrayBuffer()
+            const base64 = Buffer.from(buffer).toString('base64')
+            const mimeType = imgRes.headers.get('content-type') || 'image/jpeg'
+            parts.push({ inline_data: { mime_type: mimeType, data: base64 } })
+          }
         } catch (e) {
-          console.warn(`[vton] Image fetch failed: ${imgUrl}`)
+          console.warn(`[vton] Image fetch failed: ${imgUrl.substring(0, 50)}`)
         }
       }
 
@@ -222,8 +228,17 @@ Product: ${productTitle || 'Fashion garment'}, Category: ${garmentCategory || 't
 OUTPUT ONLY a concise, comma-separated descriptive string.`
       }
 
-      // Her görsel için image block oluştur
-      const imageBlocks = urls.map(url => ({ type: 'image' as const, source: { type: 'url' as const, url } }))
+      // Her görsel için image block oluştur (HTTP URL veya data URL/base64)
+      const imageBlocks = urls.map(url => {
+        if (url.startsWith('data:')) {
+          // data:image/jpeg;base64,/9j/4AAQ... formatını parse et
+          const match = url.match(/^data:(image\/\w+);base64,(.+)$/)
+          if (match) {
+            return { type: 'image' as const, source: { type: 'base64' as const, media_type: match[1], data: match[2] } }
+          }
+        }
+        return { type: 'image' as const, source: { type: 'url' as const, url } }
+      })
 
       const payload = JSON.stringify({
         model: 'claude-sonnet-4-20250514',
