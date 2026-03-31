@@ -1,9 +1,7 @@
 import type { Handler } from '@netlify/functions'
 
 const FAL_KEY = process.env.FAL_KEY || ''
-
-// ──────────── Senkron endpoint — KUYRUKSUZ ────────────
-const FAL_SYNC_URL = 'https://fal.run/fal-ai/nano-banana-2/edit'
+const FAL_QUEUE_URL = 'https://queue.fal.run/fal-ai/nano-banana-2/edit'
 
 // ──────────────── Prompt Templates ────────────────
 
@@ -40,6 +38,8 @@ Lighting should be neutral and evenly distributed to highlight the weave pattern
 Output should look like a premium e-commerce textile macro: realistic micro-folds, natural volume, full-frame sharpness, neutral lighting, and trustworthy material representation.`,
 }
 
+const authHeaders = { 'Authorization': `Key ${FAL_KEY}` }
+
 export const handler: Handler = async (event) => {
   if (event.httpMethod !== 'POST') {
     return { statusCode: 405, body: JSON.stringify({ error: 'Method not allowed' }) }
@@ -51,17 +51,40 @@ export const handler: Handler = async (event) => {
 
   try {
     const body = JSON.parse(event.body || '{}')
+    const { action } = body
 
-    // action: 'status' artık gerekli değil — senkron çalışıyoruz
-    // Geriye uyumluluk: status sorulursa boş dön
-    if (body.action === 'status') {
-      return {
-        statusCode: 200,
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ success: true, status: 'SYNC_MODE', message: 'Senkron modda çalışıyoruz, polling gerekli değil' }),
+    // ═══════════ STATUS CHECK (hafif, <2s) ═══════════
+    if (action === 'status') {
+      const { statusUrl, responseUrl } = body
+      if (!statusUrl) throw new Error('statusUrl gerekli')
+
+      const sRes = await fetch(statusUrl, { headers: authHeaders })
+      if (!sRes.ok) {
+        return { statusCode: 200, headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ success: true, status: 'CHECKING', httpStatus: sRes.status }) }
       }
+
+      const sData = await sRes.json()
+
+      if (sData.status === 'COMPLETED' && responseUrl) {
+        // Sonucu al
+        const rRes = await fetch(responseUrl, { headers: authHeaders })
+        if (rRes.ok) {
+          const result = await rRes.json()
+          return { statusCode: 200, headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ success: true, status: 'COMPLETED', images: result.images || [] }) }
+        }
+      }
+
+      return { statusCode: 200, headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          success: true,
+          status: sData.status || 'IN_PROGRESS',
+          queuePosition: sData.queue_position,
+        }) }
     }
 
+    // ═══════════ SUBMIT (kuyrukla, <3s) ═══════════
     const { mode, modelDesc, garmentDesc, productTitle, garmentCategory, fabricInfo, imageUrls, resolution, aspectRatio } = body
 
     let prompt: string
@@ -79,21 +102,13 @@ export const handler: Handler = async (event) => {
         throw new Error(`Geçersiz mod: ${mode}`)
     }
 
-    if (!imageUrls || imageUrls.length === 0) {
-      throw new Error('En az bir referans görsel URL gerekli')
-    }
+    if (!imageUrls || imageUrls.length === 0) throw new Error('En az bir referans görsel URL gerekli')
 
-    console.log(`[vton] SYNC call — mode: ${mode}, images: ${imageUrls.length}`)
+    console.log(`[vton] Queue submit — mode: ${mode}, images: ${imageUrls.length}`)
 
-    // ═══════════════════════════════════════════════
-    //  SENKRON ÇAĞRI — fal.run (kuyruk yok!)
-    // ═══════════════════════════════════════════════
-    const res = await fetch(FAL_SYNC_URL, {
+    const submitRes = await fetch(FAL_QUEUE_URL, {
       method: 'POST',
-      headers: {
-        'Authorization': `Key ${FAL_KEY}`,
-        'Content-Type': 'application/json',
-      },
+      headers: { ...authHeaders, 'Content-Type': 'application/json' },
       body: JSON.stringify({
         prompt,
         image_urls: imageUrls,
@@ -106,38 +121,30 @@ export const handler: Handler = async (event) => {
       }),
     })
 
-    console.log(`[vton] FAL sync response status: ${res.status}`)
-
-    if (!res.ok) {
-      const errText = await res.text()
-      console.error(`[vton] FAL error: ${errText}`)
-      throw new Error(`FAL hata (${res.status}): ${errText.substring(0, 200)}`)
+    if (!submitRes.ok) {
+      const errText = await submitRes.text()
+      throw new Error(`FAL submit failed (${submitRes.status}): ${errText.substring(0, 200)}`)
     }
 
-    const result = await res.json()
-    console.log(`[vton] FAL result keys: ${Object.keys(result).join(', ')}`)
-
-    const images = result.images || []
-    console.log(`[vton] Got ${images.length} images`)
-
-    if (images.length > 0) {
-      console.log(`[vton] Image URL: ${images[0]?.url?.substring(0, 80)}`)
-    }
+    const submitData = await submitRes.json()
+    console.log(`[vton] Queued: id=${submitData.request_id}, pos=${submitData.queue_position}`)
+    console.log(`[vton] status_url=${submitData.status_url}`)
+    console.log(`[vton] response_url=${submitData.response_url}`)
 
     return {
       statusCode: 200,
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         success: true,
-        status: 'COMPLETED',
-        images,
+        status: 'QUEUED',
+        requestId: submitData.request_id,
+        statusUrl: submitData.status_url,
+        responseUrl: submitData.response_url,
+        queuePosition: submitData.queue_position,
       }),
     }
   } catch (err: any) {
     console.error(`[vton] Error: ${err.message}`)
-    return {
-      statusCode: 500,
-      body: JSON.stringify({ error: err.message }),
-    }
+    return { statusCode: 500, body: JSON.stringify({ error: err.message }) }
   }
 }

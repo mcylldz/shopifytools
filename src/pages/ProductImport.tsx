@@ -408,7 +408,7 @@ export default function ProductImport({ addToast }: Props) {
         garmentDesc = res.description
       }
 
-      updateJob(job.id, { status: 'generating', progress: '🎨 FAL AI üretim (senkron)...' })
+      updateJob(job.id, { status: 'generating', progress: '📤 FAL AI kuyruğa gönderiliyor...' })
       const imageUrls = job.mode === 'standard' ? [modelImages[job.modelImgIdx!], productImg] : [productImg]
 
       const genRes = await fetch('/api/vton-generate', { method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -416,20 +416,69 @@ export default function ProductImport({ addToast }: Props) {
 
       if (!genRes.success) throw new Error(genRes.error)
 
-      // Senkron mod — sonuç direkt gelir
+      // Direkt sonuç geldiyse
       if (genRes.status === 'COMPLETED' && genRes.images?.length > 0) {
         const resultUrl = genRes.images[0].url
         updateJob(job.id, { status: 'done', progress: '✅ Tamamlandı', imageUrl: resultUrl })
         setVtonResults((prev) => [...prev, {
           id: `vton_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
-          mode: job.mode,
-          imageUrl: resultUrl,
-          jobId: job.id,
-          selected: false,
+          mode: job.mode, imageUrl: resultUrl, jobId: job.id, selected: false,
         }])
-      } else {
-        updateJob(job.id, { status: 'error', error: 'Sonuç alınamadı' })
+        return
       }
+
+      // Kuyrukta — FAL'ın kendi URL'leriyle poll et
+      if (!genRes.statusUrl || !genRes.responseUrl) {
+        updateJob(job.id, { status: 'error', error: 'FAL status URL alınamadı' })
+        return
+      }
+
+      const qPos = genRes.queuePosition ?? '?'
+      updateJob(job.id, { status: 'polling', progress: `⏳ Kuyruk pozisyonu: ${qPos}` })
+
+      const maxWait = 5 * 60 * 1000
+      const interval = 3000
+      const start = Date.now()
+
+      while (Date.now() - start < maxWait) {
+        await new Promise((r) => setTimeout(r, interval))
+        const elapsed = Math.round((Date.now() - start) / 1000)
+
+        try {
+          const pollRes = await fetch('/api/vton-generate', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              action: 'status',
+              statusUrl: genRes.statusUrl,
+              responseUrl: genRes.responseUrl,
+            }),
+          }).then((r) => r.json())
+
+          if (pollRes.status === 'COMPLETED' && pollRes.images?.length > 0) {
+            const resultUrl = pollRes.images[0].url
+            updateJob(job.id, { status: 'done', progress: '✅ Tamamlandı', imageUrl: resultUrl })
+            setVtonResults((prev) => [...prev, {
+              id: `vton_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+              mode: job.mode, imageUrl: resultUrl, jobId: job.id, selected: false,
+            }])
+            return
+          }
+
+          if (pollRes.status === 'FAILED') throw new Error('FAL üretim başarısız')
+
+          const pos = pollRes.queuePosition
+          const statusText = pollRes.status === 'IN_QUEUE'
+            ? `⏳ Kuyrukta (sıra: ${pos ?? '?'}) — ${elapsed}s`
+            : `⚙️ İşleniyor... — ${elapsed}s`
+          updateJob(job.id, { progress: statusText })
+        } catch (pollErr: any) {
+          if (pollErr.message === 'FAL üretim başarısız') throw pollErr
+          console.warn('Poll error:', pollErr.message)
+        }
+      }
+
+      updateJob(job.id, { status: 'error', error: 'Zaman aşımı (5 dk)' })
     } catch (err: any) {
       updateJob(job.id, { status: 'error', error: err.message, progress: '❌ Hata' })
     }
