@@ -130,7 +130,7 @@ export default function VtonTool({ addToast }: Props) {
   const buildPrompt = (pair: VtonPair, modelDesc: string, garmentDesc: string) => {
     if (pair.mode === 'standard') return `Professional editorial fashion photography. The exact same model from image 1 wearing a ${garmentDesc}. The model description: ${modelDesc}. IDENTITY & FACE: Maintain exact facial features. TECHNICAL: Realistic fabric physics, 8k resolution, photorealistic.`
     if (pair.mode === 'ghost') return `Professional studio product photography of a ${garmentDesc}. Invisible ghost mannequin effect. Pure white background. Soft studio lighting.`
-    return `High-resolution fabric texture close-up. ${pair.fabricInfo ? `Fabric: ${pair.fabricInfo}.` : ''} Natural micro-folds, edge-to-edge clarity, neutral lighting.`
+    return `Professional product photography of fabric draped on a flat surface, slightly gathered with natural soft folds and waves. Shot from a low diagonal angle (approximately 30 degrees), NOT from directly above. ${pair.fabricInfo ? `Fabric: ${pair.fabricInfo}.` : ''} Show the full texture and weave of the material. Soft diffused studio lighting, shallow depth of field, clean neutral background. The fabric should look like someone casually placed the garment on a table and photographed it up close from a slight angle.`
   }
 
   // ── Tek pair işle ──
