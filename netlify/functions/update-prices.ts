@@ -230,44 +230,58 @@ export const handler: Handler = async (event) => {
       }
     }
 
-    // ── Repair: güncellenmeyen varyantları tespit et ve güncelle ──
+    // ── Repair (paginated): her çağrıda 1 sayfa (250 ürün) tara ──
     if (action === 'repair') {
-      const { percentage, cutoffTime, updatePrice, updateCompare, dryRun } = body
+      const { percentage, cutoffTime, updatePrice, updateCompare, pageUrl } = body
       const pct = parseFloat(percentage) / 100
       const cutoff = new Date(cutoffTime).getTime()
+      const token = await getAccessToken()
 
-      console.log(`[repair] Scanning all products, cutoff: ${cutoffTime}, pct: ${percentage}%`)
+      // İlk sayfa veya devam URL'i
+      const url = pageUrl || `https://${SHOPIFY_DOMAIN}/admin/api/2025-01/products.json?limit=250&fields=id,title,status,tags,variants`
 
-      // Tüm ürünleri çek
-      const allProducts = await getAllProducts()
+      console.log(`[repair] Fetching page: ${url.substring(0, 80)}...`)
+
+      const res = await fetch(url, {
+        headers: { 'Content-Type': 'application/json', 'X-Shopify-Access-Token': token },
+      })
+      if (!res.ok) throw new Error(`Products API error: ${res.status}`)
+
+      const data = await res.json()
+      const products = data.products || []
+
       let needsUpdate: any[] = []
       let alreadyUpdated = 0
+      let scannedVariants = 0
 
-      for (const p of allProducts) {
-        for (const v of p.variants) {
-          const variantUpdated = new Date(v.updated_at).getTime()
+      for (const p of products) {
+        for (const v of (p.variants || [])) {
+          scannedVariants++
+          const variantUpdated = new Date(v.updated_at || p.updated_at || '2000-01-01').getTime()
           if (variantUpdated >= cutoff) {
-            // Bu varyant cutoff'tan sonra güncellendi → zaten işlendi
             alreadyUpdated++
           } else {
-            // Bu varyant güncellenmedi → güncellenmesi lazım
             const oldPrice = parseFloat(v.price || '0')
             const oldCompare = parseFloat(v.compare_at_price || '0')
             needsUpdate.push({
               variantId: String(v.id),
+              price: String(updatePrice !== false ? roundToHundred(oldPrice * (1 + pct)) : oldPrice),
+              comparePrice: updateCompare !== false ? (oldCompare > 0 ? String(roundToHundred(oldCompare * (1 + pct))) : null) : (oldCompare > 0 ? String(oldCompare) : null),
               productTitle: p.title,
               oldPrice,
               newPrice: updatePrice !== false ? roundToHundred(oldPrice * (1 + pct)) : oldPrice,
-              oldCompare,
-              newCompare: updateCompare !== false ? (oldCompare > 0 ? roundToHundred(oldCompare * (1 + pct)) : 0) : oldCompare,
             })
           }
         }
       }
 
-      console.log(`[repair] Found ${needsUpdate.length} un-updated, ${alreadyUpdated} already updated`)
+      // Sonraki sayfa
+      const link = res.headers.get('Link') || ''
+      const nextMatch = link.match(/<([^>]+)>;\s*rel="next"/)
+      const nextPageUrl = nextMatch ? nextMatch[1] : null
 
-      // Her zaman listeyi dön — frontend chunked apply yapacak
+      console.log(`[repair] Page: ${products.length} products, ${scannedVariants} variants, ${needsUpdate.length} need update, hasNext: ${!!nextPageUrl}`)
+
       return {
         statusCode: 200,
         headers: { 'Content-Type': 'application/json' },
@@ -275,18 +289,18 @@ export const handler: Handler = async (event) => {
           success: true,
           needsUpdate: needsUpdate.length,
           alreadyUpdated,
-          total: needsUpdate.length + alreadyUpdated,
-          samples: needsUpdate.slice(0, 20).map(v => ({
-            id: v.variantId,
+          scannedVariants,
+          scannedProducts: products.length,
+          nextPageUrl,
+          updates: needsUpdate.map(v => ({
+            variantId: v.variantId,
+            price: v.price,
+            comparePrice: v.comparePrice,
+          })),
+          samples: needsUpdate.slice(0, 5).map(v => ({
             product: v.productTitle,
             oldPrice: v.oldPrice,
             newPrice: v.newPrice,
-          })),
-          // Frontend chunked apply için tam liste
-          updates: needsUpdate.map(v => ({
-            variantId: v.variantId,
-            price: String(v.newPrice),
-            comparePrice: v.newCompare > 0 ? String(v.newCompare) : null,
           })),
         }),
       }

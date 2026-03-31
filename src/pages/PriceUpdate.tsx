@@ -527,19 +527,49 @@ export default function PriceUpdate({ addToast }: Props) {
                 setRepairScanning(true); setRepairResult(null); setRepairDone(null)
                 try {
                   const cutoff = new Date(Date.now() - parseFloat(repairCutoffHours) * 3600000).toISOString()
-                  const res = await fetch('/api/update-prices', {
-                    method: 'POST', headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ action: 'repair', percentage: repairPct, cutoffTime: cutoff, dryRun: true }),
-                  })
-                  const data = await res.json()
-                  if (!data.success) throw new Error(data.error)
-                  setRepairResult(data)
-                  addToast({ type: 'info', message: `Tarama tamamlandı: ${data.needsUpdate} varyant güncellenmemiş` })
+                  let allUpdates: any[] = []
+                  let totalNeedsUpdate = 0, totalAlreadyUpdated = 0, totalScanned = 0
+                  let allSamples: any[] = []
+                  let nextPageUrl: string | null = null
+                  let pageNum = 0
+
+                  do {
+                    pageNum++
+                    const res: Response = await fetch('/api/update-prices', {
+                      method: 'POST', headers: { 'Content-Type': 'application/json' },
+                      body: JSON.stringify({ action: 'repair', percentage: repairPct, cutoffTime: cutoff, pageUrl: nextPageUrl }),
+                    })
+                    const data: any = await res.json()
+                    if (!data.success) throw new Error(data.error)
+
+                    totalNeedsUpdate += data.needsUpdate
+                    totalAlreadyUpdated += data.alreadyUpdated
+                    totalScanned += data.scannedVariants
+                    allUpdates = [...allUpdates, ...(data.updates || [])]
+                    if (allSamples.length < 20) allSamples = [...allSamples, ...(data.samples || [])].slice(0, 20)
+                    nextPageUrl = data.nextPageUrl
+
+                    // Live progress update
+                    setRepairResult({
+                      needsUpdate: totalNeedsUpdate,
+                      alreadyUpdated: totalAlreadyUpdated,
+                      total: totalNeedsUpdate + totalAlreadyUpdated,
+                      scanned: totalScanned,
+                      page: pageNum,
+                      scanning: !!nextPageUrl,
+                      samples: allSamples,
+                      updates: allUpdates,
+                    })
+                  } while (nextPageUrl)
+
+                  addToast({ type: 'info', message: `Tarama tamamlandı: ${totalNeedsUpdate} güncellenmemiş, ${totalAlreadyUpdated} zaten güncel` })
                 } catch (err: any) { addToast({ type: 'error', message: err.message }) }
                 finally { setRepairScanning(false) }
               }}
               style={{ width: '100%', fontSize: 14, padding: '12px 20px', background: '#f59e0b', color: '#fff', fontWeight: 700, marginBottom: 12 }}>
-              {repairScanning ? <><span className="spinner" /> Taranıyor...</> : '🔍 Tara — Güncellenmeyen Varyantları Bul'}
+              {repairScanning
+                ? <><span className="spinner" /> Taranıyor... {repairResult ? `(${repairResult.scanned} varyant, sayfa ${repairResult.page})` : ''}</>
+                : '🔍 Tara — Güncellenmeyen Varyantları Bul'}
             </button>
 
             {/* Scan Results */}
