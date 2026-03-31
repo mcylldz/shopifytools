@@ -7,14 +7,31 @@ interface Props {
   addToast: (t: Omit<ToastData, 'id'>) => void
 }
 
+type VtonMode = 'standard' | 'ghost' | 'fabric' | 'flatlay' | 'detail' | 'lifestyle' | 'colorswap' | 'moodboard' | 'sizechart'
+
+const MODE_CONFIG: Record<VtonMode, { label: string; emoji: string; needsModel: boolean; needsAnalyze: boolean }> = {
+  standard:  { label: 'Standard VTON', emoji: '🤖', needsModel: true,  needsAnalyze: true },
+  ghost:     { label: 'Ghost Mode',    emoji: '👻', needsModel: false, needsAnalyze: true },
+  fabric:    { label: 'Fabric Mode',   emoji: '🧵', needsModel: false, needsAnalyze: false },
+  flatlay:   { label: 'Flat Lay',      emoji: '🏷️', needsModel: false, needsAnalyze: true },
+  detail:    { label: 'Detail Shot',   emoji: '🔍', needsModel: false, needsAnalyze: true },
+  lifestyle: { label: 'Lifestyle',     emoji: '🌆', needsModel: true,  needsAnalyze: true },
+  colorswap: { label: 'Color Swap',    emoji: '🎨', needsModel: false, needsAnalyze: true },
+  moodboard: { label: 'Mood Board',    emoji: '🖼️', needsModel: false, needsAnalyze: true },
+  sizechart: { label: 'Size Reference', emoji: '📐', needsModel: false, needsAnalyze: true },
+}
+
 interface VtonPair {
   id: string
   modelImg: string
   garmentImgs: string[]
   category: string
   side: 'front' | 'back'
-  mode: 'standard' | 'ghost' | 'fabric'
+  mode: VtonMode
   fabricInfo: string
+  targetColor?: string
+  sceneHint?: string
+  detailHint?: string
   aiProvider: string
   falModel: string
   status: 'pending' | 'analyzing' | 'generating' | 'polling' | 'done' | 'error'
@@ -63,8 +80,11 @@ export default function VtonTool({ addToast }: Props) {
   const [selectedModel, setSelectedModel] = useState(0)
   const [category, setCategory] = useState('dress')
   const [garmentSide, setGarmentSide] = useState<'front' | 'back'>('front')
-  const [mode, setMode] = useState<'standard' | 'ghost' | 'fabric'>('standard')
+  const [mode, setMode] = useState<VtonMode>('standard')
   const [fabricInfo, setFabricInfo] = useState('')
+  const [targetColor, setTargetColor] = useState('')
+  const [sceneHint, setSceneHint] = useState('')
+  const [detailHint, setDetailHint] = useState('')
   const [aiProvider, setAiProvider] = useState('fal:nano-banana-2')
 
   const [pairs, setPairs] = useState<VtonPair[]>([])
@@ -110,20 +130,27 @@ export default function VtonTool({ addToast }: Props) {
   // ── Pair ekle ──
   const addPair = () => {
     const selGarmentImgs = garmentImages.filter((_, i) => selectedGarments.has(i))
-    if (mode === 'standard' && (!selGarmentImgs.length || !modelImages.length)) {
-      addToast({ type: 'error', message: 'Standart mod için hem ürün hem model görseli gerekli' }); return
+    const cfg = MODE_CONFIG[mode]
+    if (cfg.needsModel && (!selGarmentImgs.length || !modelImages.length)) {
+      addToast({ type: 'error', message: 'Bu mod için hem ürün hem model görseli gerekli' }); return
     }
-    if ((mode === 'ghost' || mode === 'fabric') && !selGarmentImgs.length) {
+    if (!cfg.needsModel && !selGarmentImgs.length) {
       addToast({ type: 'error', message: 'Ürün görseli gerekli' }); return
     }
-    const [provider, model] = aiProvider.split(':')
+    if (mode === 'colorswap' && !targetColor.trim()) {
+      addToast({ type: 'error', message: 'Color Swap için hedef renk gerekli' }); return
+    }
+    const [provider, mdl] = aiProvider.split(':')
     setPairs((prev) => [...prev, {
       id: `p_${Date.now()}_${Math.random().toString(36).slice(2, 5)}`,
-      modelImg: mode === 'standard' ? modelImages[selectedModel] : '',
+      modelImg: cfg.needsModel ? modelImages[selectedModel] : '',
       garmentImgs: selGarmentImgs,
       category, mode, fabricInfo,
       side: garmentSide,
-      aiProvider: provider, falModel: model,
+      targetColor: targetColor || undefined,
+      sceneHint: sceneHint || undefined,
+      detailHint: detailHint || undefined,
+      aiProvider: provider, falModel: mdl,
       status: 'pending', progress: 'Bekliyor',
     }])
   }
@@ -133,9 +160,37 @@ export default function VtonTool({ addToast }: Props) {
   // ── Build prompt ──
   const buildPrompt = (pair: VtonPair, modelDesc: string, garmentDesc: string) => {
     const sideText = pair.side === 'back' ? 'BACK VIEW of the garment' : 'FRONT VIEW of the garment'
-    if (pair.mode === 'standard') return `Professional editorial fashion photography. The exact same model from image 1 wearing a ${garmentDesc}. Show the ${sideText}. The model description: ${modelDesc}. IDENTITY & FACE: Maintain exact facial features. TECHNICAL: Realistic fabric physics, 8k resolution, photorealistic.`
-    if (pair.mode === 'ghost') return `Professional studio product photography of a ${garmentDesc}. ${sideText}. Invisible ghost mannequin effect. Pure white background. Soft studio lighting.`
-    return `Professional product photography of fabric draped on a flat surface, slightly gathered with natural soft folds and waves. Shot from a low diagonal angle (approximately 30 degrees), NOT from directly above. ${pair.fabricInfo ? `Fabric: ${pair.fabricInfo}.` : ''} Show the full texture and weave of the material. Soft diffused studio lighting, shallow depth of field, clean neutral background. The fabric should look like someone casually placed the garment on a table and photographed it up close from a slight angle.`
+    switch (pair.mode) {
+      case 'standard':
+        return `Professional editorial fashion photography. The exact same model from image 1 wearing a ${garmentDesc}. Show the ${sideText}. The model description: ${modelDesc}. IDENTITY & FACE: Maintain exact facial features. TECHNICAL: Realistic fabric physics, 8k resolution, photorealistic.`
+
+      case 'ghost':
+        return `Professional studio product photography of a ${garmentDesc}. ${sideText}. Invisible ghost mannequin effect. Pure white background. Soft studio lighting. 8K resolution, photorealistic.`
+
+      case 'fabric':
+        return `Professional product photography of fabric draped on a flat surface, slightly gathered with natural soft folds and waves. Shot from a low diagonal angle (approximately 30 degrees), NOT from directly above. ${pair.fabricInfo ? `Fabric: ${pair.fabricInfo}.` : ''} Show the full texture and weave of the material. Soft diffused studio lighting, shallow depth of field, clean neutral background. The fabric should look like someone casually placed the garment on a table and photographed it up close from a slight angle.`
+
+      case 'flatlay':
+        return `Professional flat lay product photography, top-down bird's eye view at exactly 90 degrees. A ${garmentDesc} neatly laid out on a clean, minimal white surface. The garment is carefully arranged with sleeves folded symmetrically, all wrinkles smoothed out. Styled with complementary accessories placed around it (sunglasses, small handbag, delicate jewelry, elegant shoes). COMPOSITION: Centered, balanced negative space, Instagram-ready square format aesthetic. LIGHTING: Bright, even, shadowless top lighting — professional catalog flat lay. TECHNICAL: 8K resolution, crisp focus across entire frame, no perspective distortion.`
+
+      case 'detail':
+        return `Extreme close-up macro product photography of a ${garmentDesc}. Focus on the most distinctive design detail: ${pair.detailHint || 'buttons, stitching, embroidery, fabric texture, or unique design elements'}. CAMERA: Shallow depth of field (f/2.8), the detail element is razor-sharp while background softly blurs. ANGLE: Slightly angled (about 30-45 degrees) to show dimensionality and texture depth. LIGHTING: Soft directional studio light from upper-left, creating subtle shadows that reveal texture and craftsmanship. BACKGROUND: The rest of the garment serves as natural bokeh background. MOOD: Luxurious, high-end, emphasizing quality. TECHNICAL: 8K macro photography, individual thread detail visible, color-accurate.`
+
+      case 'lifestyle':
+        return `Cinematic lifestyle editorial fashion photography. A ${modelDesc} wearing a ${garmentDesc}. ${sideText}. SETTING: ${pair.sceneHint || 'European café terrace with warm afternoon golden sunlight, clean minimalist urban architecture'}. POSE: Natural, candid moment — walking, looking away, adjusting hair, or holding a coffee cup. NOT stiff catalog pose. MOOD: Aspirational, effortless elegance, warm and inviting. LIGHTING: Golden hour natural light with soft fill, warm skin tones, gentle shadows. COLOR GRADE: Warm tones, slightly desaturated earth palette, editorial magazine aesthetic. COMPOSITION: Rule of thirds, environmental context visible, depth through foreground/background elements. IDENTITY & FACE: Maintain exact facial features from reference. TECHNICAL: 85mm equivalent lens, f/2.0 shallow DOF, 8K, photorealistic fabric physics.`
+
+      case 'colorswap':
+        return `Exact same garment from the reference image: a ${garmentDesc}. CHANGE ONLY THE COLOR to ${pair.targetColor}. Keep EVERYTHING else IDENTICAL: same exact garment shape, silhouette, cut, style, fit, fabric texture, buttons, zippers, all design details, stitching, patterns layout. If the garment has a pattern (stripes, dots, floral), keep the SAME pattern but shift all colors to ${pair.targetColor} tones. The background, lighting, angle, and composition must remain EXACTLY the same as the reference. DO NOT change the garment design, style, or any structural element. ONLY the color changes. TECHNICAL: Color-accurate rendering, photorealistic, 8K.`
+
+      case 'moodboard':
+        return `Professional fashion mood board / outfit collage composition. CENTER PIECE: A ${garmentDesc} as the main focal item, displayed flat or slightly angled. COMPLEMENTARY ITEMS arranged around it: matching shoes, a handbag, sunglasses, delicate jewelry, a watch, and a fragrance bottle. STYLE: Chic, modern, feminine aesthetic with cohesive color palette complementing the garment. LAYOUT: Clean, organized grid-style arrangement with generous white space between items. Not cluttered. SURFACE: Clean white or light marble background, consistent soft shadows under each item. LIGHTING: Bright, even, professional product studio lighting. MOOD: Curated, editorial, Pinterest-worthy outfit inspiration. TECHNICAL: Sharp focus on all items, 8K resolution, color-accurate, professional catalog quality.`
+
+      case 'sizechart':
+        return `Professional product photography showing a ${garmentDesc} laid flat on a clean white surface with scale reference. A standard 30cm wooden ruler is placed alongside the garment for size reference. The garment is laid completely flat with all edges visible, sleeves extended outward. CAMERA: Perfectly top-down 90-degree bird's eye view, no perspective distortion. LIGHTING: Bright, even, shadowless studio lighting for accurate measurement reading. COMPOSITION: Full garment visible with generous margins, maximizing size context. TECHNICAL: 8K, razor-sharp focus, color-accurate, distortion-free optics.`
+
+      default:
+        return `Professional product photography of a ${garmentDesc}. High quality, 8K resolution.`
+    }
   }
 
   // ── Tek pair işle ──
@@ -144,9 +199,11 @@ export default function VtonTool({ addToast }: Props) {
     try {
       let modelDesc = '', garmentDesc = ''
 
-      if (pair.mode === 'standard' || pair.mode === 'ghost') {
+      const modeCfg = MODE_CONFIG[pair.mode]
+      if (modeCfg.needsAnalyze) {
         update({ status: 'analyzing', progress: '🔍 AI analiz...' })
-        if (pair.mode === 'standard') {
+        if (modeCfg.needsModel && pair.modelImg) {
+          // Model + Garment analiz (standard, lifestyle)
           const [mRes, gRes] = await Promise.all([
             fetch('/api/vton-generate', { method: 'POST', headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({ action: 'analyze', imageUrl: pair.modelImg, mode: 'model' }) }).then(r => r.json()),
@@ -157,12 +214,12 @@ export default function VtonTool({ addToast }: Props) {
           if (!mRes.success) throw new Error(mRes.error || 'Model analiz başarısız')
           if (!gRes.success) throw new Error(gRes.error || 'Ürün analiz başarısız')
           modelDesc = mRes.description; garmentDesc = gRes.description
-          // Track costs
           if (mRes.usage) addCost(mRes.usage.model || 'claude-sonnet-4-20250514', 'VTON Model Analiz', mRes.usage.input_tokens, mRes.usage.output_tokens)
           if (gRes.usage) addCost(gRes.usage.model || 'claude-sonnet-4-20250514', 'VTON Ürün Analiz', gRes.usage.input_tokens, gRes.usage.output_tokens)
         } else {
+          // Sadece garment analiz (ghost, flatlay, detail, colorswap, moodboard, sizechart)
           const gRes = await fetch('/api/vton-generate', { method: 'POST', headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ action: 'analyze', imageUrls: pair.garmentImgs, mode: 'ghost',
+            body: JSON.stringify({ action: 'analyze', imageUrls: pair.garmentImgs, mode: pair.mode === 'ghost' ? 'ghost' : 'garment',
               productTitle: garmentTitle, garmentCategory: pair.category, fabricInfo: pair.fabricInfo }) }).then(r => r.json())
           if (!gRes.success) throw new Error(gRes.error || 'Analiz başarısız')
           garmentDesc = gRes.description
@@ -171,7 +228,7 @@ export default function VtonTool({ addToast }: Props) {
       }
 
       const prompt = buildPrompt(pair, modelDesc, garmentDesc)
-      const imageUrls = pair.mode === 'standard' ? [pair.modelImg, ...pair.garmentImgs] : [...pair.garmentImgs]
+      const imageUrls = modeCfg.needsModel && pair.modelImg ? [pair.modelImg, ...pair.garmentImgs] : [...pair.garmentImgs]
 
       // ═══ GEMINI DIRECT ═══
       if (pair.aiProvider === 'gemini') {
@@ -371,6 +428,43 @@ export default function VtonTool({ addToast }: Props) {
           </div>
         </div>
 
+        {/* Moda özel inputlar */}
+        {mode === 'colorswap' && (
+          <div className="card" style={{ border: '2px solid #f59e0b', background: 'rgba(245,158,11,0.04)' }}>
+            <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+              <span style={{ fontSize: 20 }}>🎨</span>
+              <div className="form-group" style={{ flex: 1, margin: 0 }}>
+                <label className="form-label" style={{ fontSize: 11 }}>Hedef Renk (zorunlu)</label>
+                <input className="form-input" placeholder="Kırmızı, Navy Blue, Pastel Pink..." value={targetColor}
+                  onChange={e => setTargetColor(e.target.value)} style={{ fontSize: 13, fontWeight: 600 }} />
+              </div>
+            </div>
+          </div>
+        )}
+        {mode === 'lifestyle' && (
+          <div className="card" style={{ border: '1px solid var(--border)' }}>
+            <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+              <span style={{ fontSize: 20 }}>🌆</span>
+              <div className="form-group" style={{ flex: 1, margin: 0 }}>
+                <label className="form-label" style={{ fontSize: 11 }}>Mekan / Ortam (opsiyonel)</label>
+                <input className="form-input" placeholder="Kafe terası, sahil, şehir sokağı, park..." value={sceneHint}
+                  onChange={e => setSceneHint(e.target.value)} style={{ fontSize: 12 }} />
+              </div>
+            </div>
+          </div>
+        )}
+        {mode === 'detail' && (
+          <div className="card" style={{ border: '1px solid var(--border)' }}>
+            <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+              <span style={{ fontSize: 20 }}>🔍</span>
+              <div className="form-group" style={{ flex: 1, margin: 0 }}>
+                <label className="form-label" style={{ fontSize: 11 }}>Hangi Detay? (opsiyonel)</label>
+                <input className="form-input" placeholder="Düğme, yaka, nakış, fermuar, dantel..." value={detailHint}
+                  onChange={e => setDetailHint(e.target.value)} style={{ fontSize: 12 }} />
+              </div>
+            </div>
+          </div>
+        )}
         {/* Pair Kontrolü */}
         <div className="card">
           <div className="card-title" style={{ fontSize: 15 }}>🔗 Pair Oluştur</div>
@@ -401,11 +495,17 @@ export default function VtonTool({ addToast }: Props) {
                 onChange={e => setFabricInfo(e.target.value)} style={{ fontSize: 12, padding: '6px 8px' }} />
             </div>
           </div>
-          <div style={{ display: 'flex', gap: 10, marginBottom: 16, flexWrap: 'wrap' }}>
-            {(['standard', 'ghost', 'fabric'] as const).map(m => (
-              <label key={m} style={{ display: 'flex', alignItems: 'center', gap: 5, cursor: 'pointer', fontSize: 13 }}>
-                <input type="radio" name="vton-mode" checked={mode === m} onChange={() => setMode(m)} />
-                {m === 'standard' ? '🤖 Standard VTON' : m === 'ghost' ? '👻 Ghost Mode' : '🧵 Fabric Mode'}
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 6, marginBottom: 12 }}>
+            {(Object.keys(MODE_CONFIG) as VtonMode[]).map(m => (
+              <label key={m} style={{
+                display: 'flex', alignItems: 'center', gap: 5, cursor: 'pointer', fontSize: 12,
+                padding: '6px 10px', borderRadius: 8, transition: 'all .15s',
+                background: mode === m ? 'var(--primary)' : 'var(--bg)',
+                color: mode === m ? '#fff' : 'var(--text)',
+                border: mode === m ? '2px solid var(--primary)' : '1px solid var(--border)',
+              }}>
+                <input type="radio" name="vton-mode" checked={mode === m} onChange={() => setMode(m)} style={{ display: 'none' }} />
+                {MODE_CONFIG[m].emoji} {MODE_CONFIG[m].label}
               </label>
             ))}
             <button className="btn btn-primary" onClick={addPair} style={{ marginLeft: 'auto', fontSize: 13, padding: '8px 20px' }}>
