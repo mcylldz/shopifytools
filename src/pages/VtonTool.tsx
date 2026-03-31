@@ -12,6 +12,7 @@ interface VtonPair {
   modelImg: string
   garmentImg: string
   category: string
+  side: 'front' | 'back'
   mode: 'standard' | 'ghost' | 'fabric'
   fabricInfo: string
   aiProvider: string
@@ -61,6 +62,7 @@ export default function VtonTool({ addToast }: Props) {
   const [selectedGarment, setSelectedGarment] = useState(0)
   const [selectedModel, setSelectedModel] = useState(0)
   const [category, setCategory] = useState('dress')
+  const [garmentSide, setGarmentSide] = useState<'front' | 'back'>('front')
   const [mode, setMode] = useState<'standard' | 'ghost' | 'fabric'>('standard')
   const [fabricInfo, setFabricInfo] = useState('')
   const [aiProvider, setAiProvider] = useState('fal:nano-banana-2')
@@ -119,6 +121,7 @@ export default function VtonTool({ addToast }: Props) {
       modelImg: mode === 'standard' ? modelImages[selectedModel] : '',
       garmentImg: garmentImages[selectedGarment],
       category, mode, fabricInfo,
+      side: garmentSide,
       aiProvider: provider, falModel: model,
       status: 'pending', progress: 'Bekliyor',
     }])
@@ -128,8 +131,9 @@ export default function VtonTool({ addToast }: Props) {
 
   // ── Build prompt ──
   const buildPrompt = (pair: VtonPair, modelDesc: string, garmentDesc: string) => {
-    if (pair.mode === 'standard') return `Professional editorial fashion photography. The exact same model from image 1 wearing a ${garmentDesc}. The model description: ${modelDesc}. IDENTITY & FACE: Maintain exact facial features. TECHNICAL: Realistic fabric physics, 8k resolution, photorealistic.`
-    if (pair.mode === 'ghost') return `Professional studio product photography of a ${garmentDesc}. Invisible ghost mannequin effect. Pure white background. Soft studio lighting.`
+    const sideText = pair.side === 'back' ? 'BACK VIEW of the garment' : 'FRONT VIEW of the garment'
+    if (pair.mode === 'standard') return `Professional editorial fashion photography. The exact same model from image 1 wearing a ${garmentDesc}. Show the ${sideText}. The model description: ${modelDesc}. IDENTITY & FACE: Maintain exact facial features. TECHNICAL: Realistic fabric physics, 8k resolution, photorealistic.`
+    if (pair.mode === 'ghost') return `Professional studio product photography of a ${garmentDesc}. ${sideText}. Invisible ghost mannequin effect. Pure white background. Soft studio lighting.`
     return `Professional product photography of fabric draped on a flat surface, slightly gathered with natural soft folds and waves. Shot from a low diagonal angle (approximately 30 degrees), NOT from directly above. ${pair.fabricInfo ? `Fabric: ${pair.fabricInfo}.` : ''} Show the full texture and weave of the material. Soft diffused studio lighting, shallow depth of field, clean neutral background. The fabric should look like someone casually placed the garment on a table and photographed it up close from a slight angle.`
   }
 
@@ -369,6 +373,13 @@ export default function VtonTool({ addToast }: Props) {
               <label className="form-label" style={{ fontSize: 11 }}>Kategori</label>
               <select className="form-input" value={category} onChange={e => setCategory(e.target.value)} style={{ fontSize: 12, padding: '6px 8px' }}>
                 {CATEGORIES.map(c => <option key={c.value} value={c.value}>{c.label}</option>)}
+              </select>
+            </div>
+            <div className="form-group" style={{ flex: 0.6, minWidth: 90 }}>
+              <label className="form-label" style={{ fontSize: 11 }}>Yön</label>
+              <select className="form-input" value={garmentSide} onChange={e => setGarmentSide(e.target.value as 'front' | 'back')} style={{ fontSize: 12, padding: '6px 8px' }}>
+                <option value="front">Ön (Front)</option>
+                <option value="back">Arka (Back)</option>
               </select>
             </div>
             <div className="form-group" style={{ flex: 1, minWidth: 200 }}>
