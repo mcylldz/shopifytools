@@ -80,7 +80,7 @@ export default function VtonTool({ addToast }: Props) {
   const [pushLoading, setPushLoading] = useState(false)
 
   // Cost tracker
-  const { addCost, summary: costSummary } = useCostTracker()
+  const { addCost, session: costSession, persistent: costPersistent } = useCostTracker('vton')
 
   // ── Shopify URL'den görsel çek ──
   const fetchImages = async (side: 'garment' | 'model') => {
@@ -531,7 +531,7 @@ export default function VtonTool({ addToast }: Props) {
       )}
 
       {/* Cost Tracker */}
-      <CostPanel summary={costSummary} title="VTON Maliyet" />
+      <CostPanel session={costSession} persistent={costPersistent} title="VTON" />
     </>
   )
 }

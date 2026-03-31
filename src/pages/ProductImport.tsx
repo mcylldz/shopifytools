@@ -117,7 +117,7 @@ export default function ProductImport({ addToast }: Props) {
   const [enrichment, setEnrichment] = useState<any>(null)
 
   // Cost tracker
-  const { addCost, summary: costSummary } = useCostTracker()
+  const { addCost, session: costSession, persistent: costPersistent } = useCostTracker('import')
   const [enriching, setEnriching] = useState(false)
   const [enrichedTitle, setEnrichedTitle] = useState('')
   const [enrichedDesc, setEnrichedDesc] = useState('')
@@ -609,6 +609,9 @@ export default function ProductImport({ addToast }: Props) {
   // ────────────────── Step 9: Push ──────────────────
   const handlePush = async () => {
     if (!product) return
+    if (sellingPrice <= 0) {
+      addToast({ type: 'error', message: 'Satış fiyatı 0 olamaz. Önce fiyat belirleyin.' }); return
+    }
     setPushing(true)
     setPushResult(null)
 
@@ -1370,7 +1373,7 @@ export default function ProductImport({ addToast }: Props) {
       </div>
 
       {/* Cost Tracker */}
-      <CostPanel summary={costSummary} title="Import Maliyet" />
+      <CostPanel session={costSession} persistent={costPersistent} title="Import" />
     </>
   )
 }
