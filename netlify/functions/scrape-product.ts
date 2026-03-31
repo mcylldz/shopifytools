@@ -1,4 +1,5 @@
 import type { Handler } from '@netlify/functions'
+import { getAccessToken, SHOPIFY_DOMAIN } from './shopify-auth'
 
 interface ScrapedProduct {
   source: 'shopify' | '1688'
@@ -22,11 +23,71 @@ const CNY_TO_TRY = 7
 const USD_TO_TRY = 45
 
 function parseShopifyUrl(url: string): { store: string; handle: string } | null {
-  // https://thecommense.com/products/lace-strapless-corset-top-1
-  // https://thecommense.com/collections/new/products/lace-strapless-corset-top-1
   const match = url.match(/https?:\/\/([^/]+)\/(?:.*\/)?products\/([^/?#]+)/)
   if (match) return { store: match[1], handle: match[2] }
   return null
+}
+
+function parseAdminUrl(url: string): { productId: string } | null {
+  // https://admin.shopify.com/store/XXXXX/products/9419469226229
+  const match = url.match(/admin\.shopify\.com\/store\/[^/]+\/products\/(\d+)/)
+  if (match) return { productId: match[1] }
+  return null
+}
+
+async function scrapeShopifyAdmin(productId: string): Promise<ScrapedProduct> {
+  if (!SHOPIFY_DOMAIN) throw new Error('SHOPIFY_STORE_DOMAIN env eksik')
+  const token = await getAccessToken()
+
+  const res = await fetch(`https://${SHOPIFY_DOMAIN}/admin/api/2025-01/products/${productId}.json`, {
+    headers: {
+      'Content-Type': 'application/json',
+      'X-Shopify-Access-Token': token,
+    },
+  })
+  if (!res.ok) throw new Error(`Admin API ürün alınamadı: ${res.status}`)
+
+  const { product } = await res.json()
+
+  const sizeOption = product.options?.find((o: any) =>
+    ['size', 'beden', 'boyut'].includes(o.name.toLowerCase())
+  )
+  const colorOption = product.options?.find((o: any) =>
+    ['color', 'colour', 'renk'].includes(o.name.toLowerCase())
+  )
+  const sizes = sizeOption?.values || []
+  const colors = colorOption?.values || []
+
+  const firstPrice = parseFloat(product.variants?.[0]?.price || '0')
+  const currency = 'TRY'
+  const priceTRY = firstPrice
+
+  const images = (product.images || []).map((img: any) => img.src)
+
+  const variants = (product.variants || []).map((v: any) => ({
+    title: v.title,
+    size: v.option2 || v.option1,
+    color: colorOption ? v.option1 : undefined,
+    price: parseFloat(v.price || '0'),
+    sku: v.sku,
+  }))
+
+  return {
+    source: 'shopify',
+    title: product.title,
+    description: product.body_html || '',
+    images,
+    sizes,
+    colors,
+    price: { amount: firstPrice, currency },
+    priceTRY: Math.round(priceTRY),
+    variants,
+    vendor: product.vendor,
+    productType: product.product_type,
+    tags: product.tags,
+    handle: product.handle,
+    rawOptions: product.options,
+  }
 }
 
 async function scrapeShopify(url: string): Promise<ScrapedProduct> {
@@ -39,28 +100,23 @@ async function scrapeShopify(url: string): Promise<ScrapedProduct> {
 
   const { product } = await res.json()
 
-  // Sizes ve colors çıkar
   const sizeOption = product.options?.find((o: any) =>
     ['size', 'beden', 'boyut'].includes(o.name.toLowerCase())
   )
   const colorOption = product.options?.find((o: any) =>
     ['color', 'colour', 'renk'].includes(o.name.toLowerCase())
   )
-
   const sizes = sizeOption?.values || []
   const colors = colorOption?.values || []
 
-  // İlk variant fiyatı
   const firstPrice = parseFloat(product.variants?.[0]?.price || '0')
   const currency = product.variants?.[0]?.price_currency || 'USD'
   const priceTRY = currency === 'USD' ? firstPrice * USD_TO_TRY
     : currency === 'CNY' ? firstPrice * CNY_TO_TRY
     : firstPrice
 
-  // Görseller
   const images = (product.images || []).map((img: any) => img.src)
 
-  // Variants
   const variants = (product.variants || []).map((v: any) => ({
     title: v.title,
     size: v.option2 || v.option1,
@@ -188,6 +244,11 @@ export const handler: Handler = async (event) => {
         }
       }
       product = parse1688Html(html)
+    } else if (url && url.includes('admin.shopify.com')) {
+      // Admin URL — ürünü Admin API ile çek
+      const adminParsed = parseAdminUrl(url)
+      if (!adminParsed) throw new Error('Geçersiz admin URL formatı')
+      product = await scrapeShopifyAdmin(adminParsed.productId)
     } else if (url) {
       // Shopify
       product = await scrapeShopify(url)

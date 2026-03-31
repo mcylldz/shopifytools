@@ -3,6 +3,14 @@ import https from 'https'
 
 const FAL_KEY = process.env.FAL_KEY || ''
 const ANTHROPIC_KEY = process.env.ANTHROPIC_API_KEY || ''
+const GEMINI_KEY = process.env.GEMINI_API_KEY || ''
+
+// ═══════════ FAL Models ═══════════
+const FAL_MODELS: Record<string, string> = {
+  'nano-banana-2': '/fal-ai/nano-banana-2/edit',
+  'nano-banana-pro': '/fal-ai/nano-banana-pro/edit',
+  'nano-banana': '/fal-ai/nano-banana/edit',
+}
 
 function httpsRequest(options: https.RequestOptions, payload?: string): Promise<{ status: number; body: string }> {
   return new Promise((resolve, reject) => {
@@ -18,33 +26,6 @@ function httpsRequest(options: https.RequestOptions, payload?: string): Promise<
   })
 }
 
-// ──────────────── Prompt Templates ────────────────
-
-const PROMPTS = {
-  standard: (modelDesc: string, garmentDesc: string, productTitle: string, category: string) =>
-    `Professional editorial fashion photography. The exact same model from image 1 wearing a ${garmentDesc}. The model description: ${modelDesc}.
-
-IDENTITY & FACE:
-- Maintain exact facial features, bone structure, and expression of the model in image 1. Keep the angle, background, and environment exactly as shown in image 1.
-- Do not alter face shape, eye color, or skin texture.
-
-TECHNICAL REQUIREMENTS:
-- The garment fits perfectly with realistic fabric physics, natural folds, and heavy draping.
-- High-fidelity texture rendering, studio lighting, 8k resolution, sharp focus.
-- Masterpiece quality, photorealistic, volumetric lighting.
-- Accurate body proportions, realistic hands, natural pose.
-
-CONTEXT:
-- Product Name: ${productTitle}
-- Product Type: ${category}`,
-
-  ghost: (garmentDesc: string) =>
-    `Professional studio product photography of a ${garmentDesc}. Invisible ghost mannequin effect: The garment is shown worn by an invisible form, creating a realistic 3D shape with natural volume, folds, and drape, as if floating. Details: Show only the clean inside fabric texture through the neck opening. Background: Pure, seamless flat white studio background. Lighting: Soft, even studio lighting to highlight fabric texture. View: Front view, centered. No: No visible mannequin, no hangers, no human models, no neck labels, no brand tags.`,
-
-  fabric: (fabricInfo?: string) =>
-    `Generate a high-resolution fabric texture close-up for a Shopify product page. Use the provided product image${fabricInfo ? ` and fabric information (${fabricInfo})` : ''} to recreate the fabric with natural realism. The fabric surface should include gentle, authentic micro-folds and soft waves. The entire frame must remain fully sharp: no blur, no depth of field, no soft gradients, edge-to-edge clarity. Lighting should be neutral and evenly distributed to highlight the weave pattern, fiber detail, and the three-dimensional surface. Output should look like a premium e-commerce textile macro.`,
-}
-
 export const handler: Handler = async (event) => {
   if (event.httpMethod !== 'POST') {
     return { statusCode: 405, body: JSON.stringify({ error: 'Method not allowed' }) }
@@ -58,12 +39,16 @@ export const handler: Handler = async (event) => {
     if (action === 'fal_submit') {
       if (!FAL_KEY) throw new Error('FAL_KEY eksik')
 
+      const modelKey = body.model || 'nano-banana-2'
+      const modelPath = FAL_MODELS[modelKey]
+      if (!modelPath) throw new Error(`Geçersiz FAL model: ${modelKey}`)
+
       const payload = JSON.stringify(body.payload)
-      console.log(`[vton] fal_submit, payload size: ${payload.length}`)
+      console.log(`[vton] fal_submit model=${modelKey} path=${modelPath}`)
 
       const result = await httpsRequest({
         hostname: 'queue.fal.run',
-        path: '/fal-ai/nano-banana-2/edit',
+        path: modelPath,
         method: 'POST',
         headers: {
           'Authorization': `Key ${FAL_KEY}`,
@@ -97,11 +82,84 @@ export const handler: Handler = async (event) => {
         },
       })
 
-      console.log(`[vton] fal_status response: ${result.status}, body: ${result.body.substring(0, 200)}`)
       return {
         statusCode: result.status,
         headers: { 'Content-Type': 'application/json' },
         body: result.body,
+      }
+    }
+
+    // ═══════════ GEMINI GENERATE (direct) ═══════════
+    if (action === 'gemini_generate') {
+      if (!GEMINI_KEY) throw new Error('GEMINI_API_KEY eksik')
+
+      const { prompt, imageUrls, geminiModel } = body
+      const model = geminiModel || 'gemini-2.0-flash-exp'
+
+      // Build parts: text prompt + image URLs
+      const parts: any[] = [{ text: prompt }]
+
+      // Fetch images and convert to inline data
+      for (const imgUrl of (imageUrls || [])) {
+        try {
+          const imgRes = await fetch(imgUrl)
+          if (!imgRes.ok) continue
+          const buffer = await imgRes.arrayBuffer()
+          const base64 = Buffer.from(buffer).toString('base64')
+          const mimeType = imgRes.headers.get('content-type') || 'image/jpeg'
+          parts.push({
+            inline_data: { mime_type: mimeType, data: base64 }
+          })
+        } catch (e) {
+          console.warn(`[vton] Image fetch failed: ${imgUrl}`)
+        }
+      }
+
+      const geminiPayload = JSON.stringify({
+        contents: [{ parts }],
+        generationConfig: {
+          responseModalities: ['TEXT', 'IMAGE'],
+          temperature: 1,
+        },
+      })
+
+      const geminiPath = `/v1beta/models/${model}:generateContent?key=${GEMINI_KEY}`
+
+      const result = await httpsRequest({
+        hostname: 'generativelanguage.googleapis.com',
+        path: geminiPath,
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Content-Length': Buffer.byteLength(geminiPayload),
+        },
+      }, geminiPayload)
+
+      if (result.status !== 200) {
+        console.error(`[vton] Gemini error: ${result.body.substring(0, 300)}`)
+        throw new Error(`Gemini API error (${result.status}): ${result.body.substring(0, 200)}`)
+      }
+
+      // Parse response — Gemini returns images as inline_data base64
+      const geminiData = JSON.parse(result.body)
+      const candidates = geminiData.candidates || []
+      const responseParts = candidates[0]?.content?.parts || []
+
+      // Find image part
+      const imagePart = responseParts.find((p: any) => p.inline_data)
+      if (!imagePart) {
+        const textPart = responseParts.find((p: any) => p.text)
+        throw new Error(`Gemini görsel üretemedi: ${textPart?.text || 'Yanıt yok'}`)
+      }
+
+      return {
+        statusCode: 200,
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          success: true,
+          imageBase64: imagePart.inline_data.data,
+          mimeType: imagePart.inline_data.mime_type || 'image/png',
+        }),
       }
     }
 
@@ -152,7 +210,6 @@ OUTPUT ONLY a concise, comma-separated descriptive string.`
       }, payload)
 
       if (result.status !== 200) {
-        console.error(`[vton] Claude error: ${result.body.substring(0, 300)}`)
         throw new Error(`Claude API error (${result.status})`)
       }
 
@@ -166,62 +223,8 @@ OUTPUT ONLY a concise, comma-separated descriptive string.`
       }
     }
 
-    // ═══════════ GENERATE (eski uyumluluk) ═══════════
-    const { mode, modelDesc, garmentDesc, productTitle, garmentCategory, fabricInfo, imageUrls } = body
-    let prompt: string
+    return { statusCode: 400, body: JSON.stringify({ error: `Geçersiz action: ${action}` }) }
 
-    switch (mode) {
-      case 'standard':
-        prompt = PROMPTS.standard(modelDesc || '', garmentDesc || '', productTitle || '', garmentCategory || 'top')
-        break
-      case 'ghost':
-        prompt = PROMPTS.ghost(garmentDesc || '')
-        break
-      case 'fabric':
-        prompt = PROMPTS.fabric(fabricInfo)
-        break
-      default:
-        throw new Error(`Geçersiz mod: ${mode}`)
-    }
-
-    if (!imageUrls?.length) throw new Error('Görsel URL gerekli')
-
-    const payload = JSON.stringify({
-      prompt,
-      image_urls: imageUrls,
-      resolution: '2K',
-      aspect_ratio: '9:16',
-      num_images: 1,
-      output_format: 'png',
-      safety_tolerance: '6',
-    })
-
-    const result = await httpsRequest({
-      hostname: 'queue.fal.run',
-      path: '/fal-ai/nano-banana-2/edit',
-      method: 'POST',
-      headers: {
-        'Authorization': `Key ${FAL_KEY}`,
-        'Content-Type': 'application/json',
-        'Content-Length': Buffer.byteLength(payload),
-      },
-    }, payload)
-
-    if (result.status >= 400) throw new Error(`FAL error (${result.status}): ${result.body.substring(0, 200)}`)
-
-    const data = JSON.parse(result.body)
-    return {
-      statusCode: 200,
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        success: true,
-        status: 'QUEUED',
-        requestId: data.request_id,
-        statusUrl: data.status_url,
-        responseUrl: data.response_url,
-        queuePosition: data.queue_position,
-      }),
-    }
   } catch (err: any) {
     console.error(`[vton] Error: ${err.message}`)
     return { statusCode: 500, body: JSON.stringify({ error: err.message }) }
