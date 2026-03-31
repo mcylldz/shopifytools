@@ -2,6 +2,7 @@ import { useState } from 'react'
 import type { ToastData } from '../components/Toast'
 import { useCostTracker } from '../hooks/useCostTracker'
 import CostPanel from '../components/CostPanel'
+import CropModal from '../components/CropModal'
 
 interface Props {
   addToast: (t: Omit<ToastData, 'id'>) => void
@@ -85,6 +86,7 @@ export default function VtonTool({ addToast }: Props) {
   const [targetColor, setTargetColor] = useState('')
   const [sceneHint, setSceneHint] = useState('')
   const [detailHint, setDetailHint] = useState('')
+  const [cropIndex, setCropIndex] = useState<number | null>(null)
   const [aiProvider, setAiProvider] = useState('fal:nano-banana-2')
 
   const [pairs, setPairs] = useState<VtonPair[]>([])
@@ -383,22 +385,30 @@ export default function VtonTool({ addToast }: Props) {
             {garmentTitle && <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 8 }}>{garmentTitle}</div>}
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(85px, 1fr))', gap: 8, maxHeight: 350, overflowY: 'auto', padding: 4 }}>
               {garmentImages.map((img, idx) => (
-                <div key={idx} onClick={() => {
-                  setSelectedGarments(prev => {
-                    const next = new Set(prev)
-                    if (next.has(idx)) { if (next.size > 1) next.delete(idx) }
-                    else next.add(idx)
-                    return next
-                  })
-                }} style={{
-                  border: selectedGarments.has(idx) ? '3px solid var(--primary)' : '2px solid var(--border)',
-                  borderRadius: 8, overflow: 'hidden', cursor: 'pointer', position: 'relative',
-                  opacity: selectedGarments.has(idx) ? 1 : 0.5, transition: 'all .15s',
-                }}>
-                  <img src={img} alt="" style={{ width: '100%', height: 110, objectFit: 'cover' }} />
-                  {selectedGarments.has(idx) && (
-                    <div style={{ position: 'absolute', top: 4, right: 4, background: 'var(--primary)', color: '#fff', borderRadius: '50%', width: 20, height: 20, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 11, fontWeight: 700 }}>✓</div>
-                  )}
+                <div key={idx} style={{ position: 'relative' }}>
+                  <div onClick={() => {
+                    setSelectedGarments(prev => {
+                      const next = new Set(prev)
+                      if (next.has(idx)) { if (next.size > 1) next.delete(idx) }
+                      else next.add(idx)
+                      return next
+                    })
+                  }} style={{
+                    border: selectedGarments.has(idx) ? '3px solid var(--primary)' : '2px solid var(--border)',
+                    borderRadius: 8, overflow: 'hidden', cursor: 'pointer', position: 'relative',
+                    opacity: selectedGarments.has(idx) ? 1 : 0.5, transition: 'all .15s',
+                  }}>
+                    <img src={img} alt="" style={{ width: '100%', height: 110, objectFit: 'cover' }} />
+                    {selectedGarments.has(idx) && (
+                      <div style={{ position: 'absolute', top: 4, right: 4, background: 'var(--primary)', color: '#fff', borderRadius: '50%', width: 20, height: 20, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 11, fontWeight: 700 }}>✓</div>
+                    )}
+                  </div>
+                  <button onClick={(e) => { e.stopPropagation(); setCropIndex(idx) }} style={{
+                    position: 'absolute', bottom: 4, left: '50%', transform: 'translateX(-50%)',
+                    fontSize: 10, padding: '2px 8px', borderRadius: 4,
+                    background: 'rgba(0,0,0,0.7)', color: '#fff', border: 'none',
+                    cursor: 'pointer', whiteSpace: 'nowrap',
+                  }}>✂️ Crop</button>
                 </div>
               ))}
             </div>
@@ -652,6 +662,19 @@ export default function VtonTool({ addToast }: Props) {
             </button>
           </div>
         </div>
+      )}
+
+      {/* Crop Modal */}
+      {cropIndex !== null && garmentImages[cropIndex] && (
+        <CropModal
+          imageUrl={garmentImages[cropIndex]}
+          onCancel={() => setCropIndex(null)}
+          onConfirm={(croppedUrl) => {
+            setGarmentImages(prev => prev.map((img, i) => i === cropIndex ? croppedUrl : img))
+            setCropIndex(null)
+            addToast({ type: 'success', message: `Görsel ${cropIndex + 1} kırpıldı ✂️` })
+          }}
+        />
       )}
 
       {/* Cost Tracker */}
