@@ -58,10 +58,11 @@ async function getCollectionProducts(collectionId: string): Promise<any[]> {
 }
 
 // ── Tüm ürünler veya tag bazlı (REST) ──
-async function getAllProducts(tag?: string, onSale?: boolean): Promise<any[]> {
+async function getAllProducts(tag?: string, onSale?: boolean, status?: string): Promise<any[]> {
   const token = await getAccessToken()
   const products: any[] = []
-  let nextUrl = `https://${SHOPIFY_DOMAIN}/admin/api/2025-01/products.json?limit=250&fields=id,title,status,tags,variants`
+  const statusParam = status && status !== 'any' ? `&status=${status}` : ''
+  let nextUrl = `https://${SHOPIFY_DOMAIN}/admin/api/2025-01/products.json?limit=250&fields=id,title,status,tags,variants${statusParam}`
 
   while (nextUrl) {
     const res = await fetch(nextUrl, {
@@ -148,20 +149,24 @@ export const handler: Handler = async (event) => {
 
     // ── Preview: ürünleri çek ve öncesi/sonrası göster ──
     if (action === 'preview') {
-      const { filter, collectionId, productIds, tag, percentage, updatePrice, updateCompare } = body
+      const { filter, collectionId, productIds, tag, percentage, updatePrice, updateCompare, productStatus } = body
       let products: any[] = []
 
       if (filter === 'whole_store') {
-        products = await getAllProducts()
+        products = await getAllProducts(undefined, undefined, productStatus)
       } else if (filter === 'collection' && collectionId) {
         products = await getCollectionProducts(collectionId)
+        // Status filtresi (GraphQL collection'dan gelen)
+        if (productStatus && productStatus !== 'any') {
+          products = products.filter((p) => p.status?.toUpperCase() === productStatus.toUpperCase())
+        }
       } else if (filter === 'products' && productIds?.length) {
-        const all = await getAllProducts()
+        const all = await getAllProducts(undefined, undefined, productStatus)
         products = all.filter((p) => productIds.includes(String(p.id)))
       } else if (filter === 'on_sale') {
-        products = await getAllProducts(undefined, true)
+        products = await getAllProducts(undefined, true, productStatus)
       } else if (filter === 'tag' && tag) {
-        products = await getAllProducts(tag)
+        products = await getAllProducts(tag, undefined, productStatus)
       } else {
         throw new Error('Geçersiz filtre')
       }

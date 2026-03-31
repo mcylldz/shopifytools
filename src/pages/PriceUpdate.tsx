@@ -33,6 +33,7 @@ export default function PriceUpdate({ addToast }: Props) {
   const [percentage, setPercentage] = useState('')
   const [updatePrice, setUpdatePrice] = useState(true)
   const [updateCompare, setUpdateCompare] = useState(true)
+  const [productStatus, setProductStatus] = useState('any')
 
   const [collections, setCollections] = useState<Collection[]>([])
   const [selectedCollection, setSelectedCollection] = useState('')
@@ -83,6 +84,7 @@ export default function PriceUpdate({ addToast }: Props) {
         percentage,
         updatePrice,
         updateCompare,
+        productStatus,
       }
 
       if (filter === 'collection') body.collectionId = selectedCollection
@@ -176,6 +178,25 @@ export default function PriceUpdate({ addToast }: Props) {
                 {f.label}
               </button>
             ))}
+          </div>
+
+          {/* Ürün Durumu */}
+          <div style={{ marginBottom: 16 }}>
+            <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 6, fontWeight: 600 }}>Ürün Durumu</div>
+            <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+              {[
+                { value: 'any', label: '🔄 Hepsi' },
+                { value: 'active', label: '✅ Aktif' },
+                { value: 'draft', label: '📝 Taslak' },
+                { value: 'archived', label: '📦 Arşiv' },
+              ].map((s) => (
+                <button key={s.value} className={`btn ${productStatus === s.value ? 'btn-primary' : ''}`}
+                  onClick={() => setProductStatus(s.value)}
+                  style={{ fontSize: 11, padding: '5px 12px' }}>
+                  {s.label}
+                </button>
+              ))}
+            </div>
           </div>
 
           {/* Koleksiyon Seçimi */}
