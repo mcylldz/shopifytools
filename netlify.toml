@@ -3,6 +3,12 @@
   publish = "dist"
   functions = "netlify/functions"
 
+[functions]
+  node_bundler = "esbuild"
+
+  [functions."vton-generate"]
+    timeout = 60
+
 [dev]
   command = "npm run dev:vite"
   targetPort = 3000

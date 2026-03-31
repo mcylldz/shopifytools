@@ -375,33 +375,6 @@ export default function ProductImport({ addToast }: Props) {
     setVtonJobs((prev) => prev.map((j) => j.id === jobId ? { ...j, ...update } : j))
   }
 
-  const pollForResult = async (requestId: string, jobId: string, statusUrl?: string, responseUrl?: string): Promise<string | null> => {
-    const maxWait = 5 * 60 * 1000
-    const interval = 5000
-    const start = Date.now()
-    while (Date.now() - start < maxWait) {
-      await new Promise((r) => setTimeout(r, interval))
-      const elapsed = Math.round((Date.now() - start) / 1000)
-      updateJob(jobId, { progress: `⏳ Polling... (${elapsed}s)` })
-      try {
-        const res = await fetch('/api/vton-generate', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ action: 'status', requestId, statusUrl, responseUrl }),
-        })
-        const data = await res.json()
-        console.log(`[VTON Poll] ${elapsed}s:`, data.status, data.debug ? JSON.stringify(data.debug).substring(0, 200) : '')
-
-        if (data.status === 'COMPLETED' && data.images?.length > 0) {
-          return data.images[0].url
-        }
-        if (data.status === 'FAILED') throw new Error('FAL generation failed')
-      } catch (e: any) {
-        console.warn('Poll error:', e.message)
-      }
-    }
-    return null
-  }
 
   const runSingleJob = async (job: VtonJob) => {
     if (!product) return
@@ -435,7 +408,7 @@ export default function ProductImport({ addToast }: Props) {
         garmentDesc = res.description
       }
 
-      updateJob(job.id, { status: 'generating', progress: '🎨 FAL AI üretim...' })
+      updateJob(job.id, { status: 'generating', progress: '🎨 FAL AI üretim (senkron)...' })
       const imageUrls = job.mode === 'standard' ? [modelImages[job.modelImgIdx!], productImg] : [productImg]
 
       const genRes = await fetch('/api/vton-generate', { method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -443,26 +416,19 @@ export default function ProductImport({ addToast }: Props) {
 
       if (!genRes.success) throw new Error(genRes.error)
 
-      let resultUrl: string | null = null
-
+      // Senkron mod — sonuç direkt gelir
       if (genRes.status === 'COMPLETED' && genRes.images?.length > 0) {
-        resultUrl = genRes.images[0].url
-      } else if (genRes.requestId) {
-        updateJob(job.id, { status: 'polling', progress: '⏳ Sonuç bekleniyor...', requestId: genRes.requestId })
-        resultUrl = await pollForResult(genRes.requestId, job.id, genRes.statusUrl, genRes.responseUrl)
-      }
-
-      if (resultUrl) {
+        const resultUrl = genRes.images[0].url
         updateJob(job.id, { status: 'done', progress: '✅ Tamamlandı', imageUrl: resultUrl })
         setVtonResults((prev) => [...prev, {
           id: `vton_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
           mode: job.mode,
-          imageUrl: resultUrl!,
+          imageUrl: resultUrl,
           jobId: job.id,
           selected: false,
         }])
       } else {
-        updateJob(job.id, { status: 'error', error: 'Sonuç alınamadı (timeout)' })
+        updateJob(job.id, { status: 'error', error: 'Sonuç alınamadı' })
       }
     } catch (err: any) {
       updateJob(job.id, { status: 'error', error: err.message, progress: '❌ Hata' })
