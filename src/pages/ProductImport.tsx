@@ -228,7 +228,7 @@ export default function ProductImport({ addToast }: Props) {
     if (p.source === 'shopify') {
       baseTRY = p.price.amount * 45
     }
-    const selling = roundTo100(baseTRY * 2)
+    const selling = roundTo100(baseTRY * 2.7)
     setSellingPrice(selling)
     const discounts = [0.4, 0.5, 0.6]
     const disc = discounts[Math.floor(Math.random() * discounts.length)]
@@ -609,11 +609,16 @@ export default function ProductImport({ addToast }: Props) {
             price: String(sellingPrice),
             compareAtPrice: String(comparePrice),
           })))
-        : sizes.map((s) => ({
-            size: s,
-            price: String(sellingPrice),
-            compareAtPrice: String(comparePrice),
-          }))
+        : sizes.length > 0
+          ? sizes.map((s) => ({
+              size: s,
+              price: String(sellingPrice),
+              compareAtPrice: String(comparePrice),
+            }))
+          : [{
+              price: String(sellingPrice),
+              compareAtPrice: String(comparePrice),
+            }]
 
       const res = await fetch('/api/create-product', {
         method: 'POST',
@@ -624,7 +629,7 @@ export default function ProductImport({ addToast }: Props) {
           handle,
           tags: tags.split(',').map((t) => t.trim()).filter(Boolean),
           images: selectedImages.map((i) => i.url).filter((u) => u.startsWith('http')),
-          variants: finalVariants.length > 0 ? finalVariants : [{ price: String(sellingPrice), compareAtPrice: String(comparePrice) }],
+          variants: finalVariants,
           vendor: product.vendor || '',
           productType: product.productType || '',
         }),
@@ -651,7 +656,9 @@ export default function ProductImport({ addToast }: Props) {
               addFinishTag: false,
             }),
           })
-        } catch { /* opsiyonel */ }
+        } catch (e: any) {
+          console.warn('[push] Metafield save failed:', e.message)
+        }
       }
 
       addToast({ type: 'success', message: `✅ Ürün oluşturuldu: ${data.product.title}` })
@@ -860,8 +867,8 @@ export default function ProductImport({ addToast }: Props) {
               </div>
               <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 4 }}>
                 {product.source === '1688'
-                  ? `Formül: (${product.price.amount} × 7 + 1400) × 2 → en yakın 100`
-                  : `Formül: ${product.price.amount} × 45 × 2 → en yakın 100`}
+                  ? `Formül: (${product.price.amount} × 7 + 1400) × 2.7 → en yakın 100`
+                  : `Formül: ${product.price.amount} × 45 × 2.7 → en yakın 100`}
               </div>
             </div>
 

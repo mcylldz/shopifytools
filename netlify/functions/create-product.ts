@@ -105,6 +105,7 @@ export const handler: Handler = async (event) => {
       }))
 
     console.log(`[create-product] Creating: ${body.title}, images: ${media.length}, variants: ${body.variants?.length}`)
+    console.log(`[create-product] Variant data:`, JSON.stringify(body.variants?.slice(0, 3)))
 
     const createData = await graphqlFetch<any>(PRODUCT_CREATE, {
       product,
@@ -129,9 +130,9 @@ export const handler: Handler = async (event) => {
     // Default variant'ın ID'si (sonra silinecek)
     const defaultVariantId = createdProduct.variants?.nodes?.[0]?.id
 
-    // ── Adım 2: Variant'ları ekle ──
+    // ── Adım 2: Variant'ı ayarla ──
     if (hasSizes && body.variants && body.variants.length > 0) {
-      // Önce variant'ları ekle
+      // Çoklu variant (size bazlı)
       const variantInputs = body.variants.map((v) => ({
         price: v.price,
         compareAtPrice: v.compareAtPrice || undefined,
@@ -140,7 +141,7 @@ export const handler: Handler = async (event) => {
         ],
       }))
 
-      console.log(`[create-product] Adding ${variantInputs.length} variants...`)
+      console.log(`[create-product] Adding ${variantInputs.length} variants with sizes...`)
 
       const variantData = await graphqlFetch<any>(PRODUCT_VARIANT_BULK, {
         productId: createdProduct.id,
@@ -155,27 +156,37 @@ export const handler: Handler = async (event) => {
 
       const createdVariants = variantData.productVariantsBulkCreate?.productVariants || []
       console.log(`[create-product] ${createdVariants.length} variants created`)
-    } else if (body.variants?.length === 1) {
-      // Tek variant — fiyat güncelle
-      if (defaultVariantId) {
-        try {
-          await graphqlFetch<any>(`
-            mutation variantUpdate($input: ProductVariantInput!) {
-              productVariantUpdate(input: $input) {
-                productVariant { id price }
-                userErrors { field message }
-              }
+    } else if (defaultVariantId && body.variants && body.variants.length > 0) {
+      // Tek variant veya boyut yok — default variant'ın fiyatını güncelle
+      const v = body.variants[0]
+      const price = v.price || '0'
+      const compareAtPrice = v.compareAtPrice || undefined
+
+      console.log(`[create-product] Updating default variant price: ${price}, compare: ${compareAtPrice}`)
+
+      try {
+        const updateResult = await graphqlFetch<any>(`
+          mutation variantUpdate($input: ProductVariantInput!) {
+            productVariantUpdate(input: $input) {
+              productVariant { id price compareAtPrice }
+              userErrors { field message }
             }
-          `, {
-            input: {
-              id: defaultVariantId,
-              price: body.variants[0].price,
-              compareAtPrice: body.variants[0].compareAtPrice || undefined,
-            },
-          })
-        } catch (e: any) {
-          console.error(`[create-product] Variant update error: ${e.message}`)
+          }
+        `, {
+          input: {
+            id: defaultVariantId,
+            price,
+            compareAtPrice,
+          },
+        })
+        const vErrors = updateResult.productVariantUpdate?.userErrors || []
+        if (vErrors.length > 0) {
+          console.error(`[create-product] Variant update errors:`, JSON.stringify(vErrors))
+        } else {
+          console.log(`[create-product] Default variant updated successfully`)
         }
+      } catch (e: any) {
+        console.error(`[create-product] Variant update error: ${e.message}`)
       }
     }
 
