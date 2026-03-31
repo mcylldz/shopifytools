@@ -2,7 +2,7 @@ import type { Handler } from '@netlify/functions'
 
 const FAL_KEY = process.env.FAL_KEY || ''
 const FAL_MODEL = 'fal-ai/nano-banana-2/edit'
-const FAL_BASE = `https://queue.fal.run/${FAL_MODEL}`
+const FAL_QUEUE_BASE = `https://queue.fal.run/${FAL_MODEL}`
 
 // ──────────────── Prompt Templates ────────────────
 
@@ -39,6 +39,23 @@ Lighting should be neutral and evenly distributed to highlight the weave pattern
 Output should look like a premium e-commerce textile macro: realistic micro-folds, natural volume, full-frame sharpness, neutral lighting, and trustworthy material representation.`,
 }
 
+// Helper: FAL response'tan image URL çıkar
+function extractImageUrl(data: any): string | null {
+  // Format 1: { images: [{ url: "..." }] }
+  if (data?.images?.length > 0) {
+    return data.images[0].url || data.images[0].src || null
+  }
+  // Format 2: { output: { images: [...] } }
+  if (data?.output?.images?.length > 0) {
+    return data.output.images[0].url || data.output.images[0].src || null
+  }
+  // Format 3: { image: { url: "..." } }
+  if (data?.image?.url) return data.image.url
+  // Format 4: { url: "..." }
+  if (data?.url) return data.url
+  return null
+}
+
 export const handler: Handler = async (event) => {
   if (event.httpMethod !== 'POST') {
     return { statusCode: 405, body: JSON.stringify({ error: 'Method not allowed' }) }
@@ -52,75 +69,106 @@ export const handler: Handler = async (event) => {
     const {
       mode, modelDesc, garmentDesc, productTitle, garmentCategory,
       fabricInfo, imageUrls, resolution, aspectRatio,
-      // Polling mode: requestId varsa sonucu getir
       action, requestId,
     } = JSON.parse(event.body || '{}')
 
     // ── ACTION: STATUS — Sonucu kontrol et ──
     if (action === 'status' && requestId) {
-      const statusRes = await fetch(`${FAL_BASE}/requests/${requestId}/status`, {
-        method: 'GET',
-        headers: { 'Authorization': `Key ${FAL_KEY}` },
-      })
+      console.log(`[vton-generate] Checking status for: ${requestId}`)
 
-      if (!statusRes.ok) {
-        // Bazı FAL modelleri status endpoint'i yerine doğrudan result döner
-        // Result endpoint'i dene
-        const resultRes = await fetch(`${FAL_BASE}/requests/${requestId}`, {
+      // Önce status endpoint'ini dene
+      try {
+        const statusRes = await fetch(`${FAL_QUEUE_BASE}/requests/${requestId}/status`, {
           method: 'GET',
           headers: { 'Authorization': `Key ${FAL_KEY}` },
         })
 
-        if (resultRes.ok) {
-          const result = await resultRes.json()
+        console.log(`[vton-generate] Status endpoint response: ${statusRes.status}`)
+
+        if (statusRes.ok) {
+          const statusData = await statusRes.json()
+          console.log(`[vton-generate] Status data: ${JSON.stringify(statusData).substring(0, 200)}`)
+
+          if (statusData.status === 'COMPLETED') {
+            // Result'ı getir
+            const resultRes = await fetch(`${FAL_QUEUE_BASE}/requests/${requestId}`, {
+              method: 'GET',
+              headers: { 'Authorization': `Key ${FAL_KEY}` },
+            })
+            if (resultRes.ok) {
+              const result = await resultRes.json()
+              console.log(`[vton-generate] Result keys: ${Object.keys(result).join(', ')}`)
+              const imgUrl = extractImageUrl(result)
+              if (imgUrl) {
+                return {
+                  statusCode: 200,
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({
+                    success: true,
+                    status: 'COMPLETED',
+                    images: [{ url: imgUrl }],
+                  }),
+                }
+              }
+            }
+          }
+
+          if (statusData.status === 'FAILED') {
+            return {
+              statusCode: 200,
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ success: true, status: 'FAILED', error: statusData.error || 'Unknown' }),
+            }
+          }
+
+          // Hâlâ processing
           return {
             statusCode: 200,
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              success: true,
-              status: 'COMPLETED',
-              images: result.images || [],
-              description: result.description || '',
-            }),
+            body: JSON.stringify({ success: true, status: statusData.status || 'IN_PROGRESS' }),
           }
         }
-
-        return {
-          statusCode: 200,
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ success: true, status: 'IN_PROGRESS' }),
-        }
+      } catch (statusErr: any) {
+        console.log(`[vton-generate] Status endpoint error: ${statusErr.message}`)
       }
 
-      const statusData = await statusRes.json()
-
-      if (statusData.status === 'COMPLETED') {
-        // Sonucu getir
-        const resultRes = await fetch(`${FAL_BASE}/requests/${requestId}`, {
+      // Status endpoint çalışmazsa doğrudan result endpoint'ini dene
+      try {
+        const resultRes = await fetch(`${FAL_QUEUE_BASE}/requests/${requestId}`, {
           method: 'GET',
           headers: { 'Authorization': `Key ${FAL_KEY}` },
         })
-        const result = await resultRes.json()
 
-        return {
-          statusCode: 200,
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            success: true,
-            status: 'COMPLETED',
-            images: result.images || [],
-            description: result.description || '',
-          }),
+        console.log(`[vton-generate] Direct result endpoint: ${resultRes.status}`)
+
+        if (resultRes.ok) {
+          const result = await resultRes.json()
+          console.log(`[vton-generate] Direct result keys: ${Object.keys(result).join(', ')}`)
+          const imgUrl = extractImageUrl(result)
+          if (imgUrl) {
+            return {
+              statusCode: 200,
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                success: true,
+                status: 'COMPLETED',
+                images: [{ url: imgUrl }],
+              }),
+            }
+          }
+
+          // Result döndü ama image bulunamadı — full response logla
+          console.log(`[vton-generate] Result without image: ${JSON.stringify(result).substring(0, 500)}`)
         }
+      } catch (resultErr: any) {
+        console.log(`[vton-generate] Result endpoint error: ${resultErr.message}`)
       }
 
+      // Hiçbiri çalışmadıysa IN_PROGRESS dön
       return {
         statusCode: 200,
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          success: true,
-          status: statusData.status || 'IN_PROGRESS',
-        }),
+        body: JSON.stringify({ success: true, status: 'IN_PROGRESS' }),
       }
     }
 
@@ -128,12 +176,7 @@ export const handler: Handler = async (event) => {
     let prompt: string
     switch (mode) {
       case 'standard':
-        prompt = FINAL_PROMPTS.standard(
-          modelDesc || 'Fashion model',
-          garmentDesc || 'Fashion garment',
-          productTitle || '',
-          garmentCategory || 'top'
-        )
+        prompt = FINAL_PROMPTS.standard(modelDesc || 'Fashion model', garmentDesc || 'Fashion garment', productTitle || '', garmentCategory || 'top')
         break
       case 'ghost':
         prompt = FINAL_PROMPTS.ghost(garmentDesc || 'Fashion garment')
@@ -149,9 +192,9 @@ export const handler: Handler = async (event) => {
       throw new Error('En az bir referans görsel URL gerekli')
     }
 
-    console.log(`[vton-generate] Mode: ${mode}, Images: ${imageUrls.length}`)
+    console.log(`[vton-generate] Submitting mode: ${mode}, images: ${imageUrls.length}`)
 
-    const submitRes = await fetch(FAL_BASE, {
+    const submitRes = await fetch(FAL_QUEUE_BASE, {
       method: 'POST',
       headers: {
         'Authorization': `Key ${FAL_KEY}`,
@@ -175,24 +218,25 @@ export const handler: Handler = async (event) => {
     }
 
     const submitData = await submitRes.json()
+    console.log(`[vton-generate] Submit response keys: ${Object.keys(submitData).join(', ')}`)
 
-    // FAL bazen syncron dönüyor (images direkt result'ta)
-    if (submitData.images && submitData.images.length > 0) {
+    // FAL bazen sync dönüyor
+    const syncImg = extractImageUrl(submitData)
+    if (syncImg) {
       return {
         statusCode: 200,
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           success: true,
           status: 'COMPLETED',
-          images: submitData.images,
-          description: submitData.description || '',
+          images: [{ url: syncImg }],
         }),
       }
     }
 
-    // Async — request_id dön, frontend poll edecek
+    // Async — request_id dön
     const rid = submitData.request_id
-    console.log(`[vton-generate] Submitted, request_id: ${rid}`)
+    console.log(`[vton-generate] Queued, request_id: ${rid}`)
 
     return {
       statusCode: 200,

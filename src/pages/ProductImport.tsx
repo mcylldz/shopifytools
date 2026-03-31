@@ -471,9 +471,24 @@ export default function ProductImport({ addToast }: Props) {
     const pendingJobs = vtonJobs.filter((j) => j.status === 'queued')
     if (pendingJobs.length === 0) { addToast({ type: 'info', message: 'Kuyrukta bekleyen iş yok' }); return }
     setVtonRunning(true)
-    for (const job of pendingJobs) {
+
+    // 5 concurrent, geri kalanı sırada bekler
+    const CONCURRENCY = 5
+    const queue = [...pendingJobs]
+    const running: Promise<void>[] = []
+
+    const runNext = async (): Promise<void> => {
+      const job = queue.shift()
+      if (!job) return
       await runSingleJob(job)
+      await runNext()
     }
+
+    for (let i = 0; i < Math.min(CONCURRENCY, queue.length); i++) {
+      running.push(runNext())
+    }
+
+    await Promise.all(running)
     setVtonRunning(false)
     addToast({ type: 'success', message: `✅ ${pendingJobs.length} iş tamamlandı` })
   }
