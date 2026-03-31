@@ -74,6 +74,7 @@ export default function VtonTool({ addToast }: Props) {
   const [pushingId, setPushingId] = useState<string | null>(null)
   const [pushProductUrl, setPushProductUrl] = useState('')
   const [pushPosition, setPushPosition] = useState('1')
+  const [pushMode, setPushMode] = useState<'add' | 'replace'>('add')
   const [pushLoading, setPushLoading] = useState(false)
 
   // ── Shopify URL'den görsel çek ──
@@ -243,7 +244,7 @@ export default function VtonTool({ addToast }: Props) {
         setPushLoading(false); return
       }
 
-      const payload: any = { productId, position: parseInt(pushPosition) || 1 }
+      const payload: any = { productId, position: parseInt(pushPosition) || 1, pushMode }
 
       if (result.isBase64) {
         // Base64 data
@@ -260,7 +261,10 @@ export default function VtonTool({ addToast }: Props) {
       const data = await res.json()
       if (!data.success) throw new Error(data.error)
 
-      addToast({ type: 'success', message: `Görsel ürüne eklendi! (sıra: ${data.image.position})` })
+      addToast({ type: 'success', message: pushMode === 'replace'
+        ? `Görsel ${data.image.position}. sıradaki ile değiştirildi!`
+        : `Görsel ${data.image.position}. sıraya eklendi!`
+      })
       setPushingId(null)
       setPushProductUrl('')
     } catch (err: any) {
@@ -450,15 +454,30 @@ export default function VtonTool({ addToast }: Props) {
                         <div style={{ fontSize: 10, color: 'var(--text-muted)', marginBottom: 4 }}>Shopify Admin URL:</div>
                         <input className="form-input" placeholder="admin.shopify.com/store/.../products/ID"
                           value={pushProductUrl} onChange={e => setPushProductUrl(e.target.value)}
-                          style={{ fontSize: 11, padding: '4px 8px', marginBottom: 4 }} />
+                          style={{ fontSize: 11, padding: '4px 8px', marginBottom: 6 }} />
+
+                        {/* Push Mode */}
+                        <div style={{ display: 'flex', gap: 10, marginBottom: 6 }}>
+                          <label style={{ display: 'flex', alignItems: 'center', gap: 4, cursor: 'pointer', fontSize: 11 }}>
+                            <input type="radio" name={`push-mode-${r.id}`} checked={pushMode === 'add'}
+                              onChange={() => setPushMode('add')} />
+                            ➕ Ek olarak ekle
+                          </label>
+                          <label style={{ display: 'flex', alignItems: 'center', gap: 4, cursor: 'pointer', fontSize: 11 }}>
+                            <input type="radio" name={`push-mode-${r.id}`} checked={pushMode === 'replace'}
+                              onChange={() => setPushMode('replace')} />
+                            🔄 Yerine koy
+                          </label>
+                        </div>
+
                         <div style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
-                          <span style={{ fontSize: 10, color: 'var(--text-muted)' }}>Sıra:</span>
+                          <span style={{ fontSize: 10, color: 'var(--text-muted)', whiteSpace: 'nowrap' }}>Sıra:</span>
                           <input className="form-input" type="number" min="1" value={pushPosition}
                             onChange={e => setPushPosition(e.target.value)}
                             style={{ width: 50, fontSize: 11, padding: '4px 6px', textAlign: 'center' }} />
                           <button className="btn btn-sm btn-primary" onClick={() => handlePushImage(r)} disabled={pushLoading}
                             style={{ flex: 1, fontSize: 10, padding: '4px 8px' }}>
-                            {pushLoading ? '⏳' : '📤 Gönder'}
+                            {pushLoading ? '⏳' : pushMode === 'replace' ? '🔄 Değiştir' : '➕ Ekle'}
                           </button>
                           <button className="btn btn-sm" onClick={() => setPushingId(null)}
                             style={{ fontSize: 10, padding: '4px 8px' }}>✕</button>
