@@ -203,23 +203,27 @@ export const handler: Handler = async (event) => {
     if (action === 'analyze') {
       if (!ANTHROPIC_KEY) throw new Error('ANTHROPIC_API_KEY eksik')
 
-      const { imageUrl, mode, productTitle, garmentCategory, fabricInfo } = body
+      const { imageUrl, imageUrls, mode, productTitle, garmentCategory, fabricInfo } = body
+
+      // Tek veya çoklu görsel desteği
+      const urls: string[] = imageUrls && imageUrls.length > 0 ? imageUrls : (imageUrl ? [imageUrl] : [])
+      if (urls.length === 0) throw new Error('En az bir görsel URL gerekli')
 
       let systemPrompt = ''
       if (mode === 'model') {
-        systemPrompt = `Describe this fashion model image for an AI image generator. Focus on:
-1. The model's pose, gender, and visible physical traits.
-2. The clothing they are currently wearing (to be replaced).
-3. The lighting, background, and camera angle.
-Output a concise, descriptive prompt.`
+        systemPrompt = `Describe this fashion model image for an AI image generator. Focus on:\n1. The model's pose, gender, and visible physical traits.\n2. The clothing they are currently wearing (to be replaced).\n3. The lighting, background, and camera angle.\nOutput a concise, descriptive prompt.`
       } else {
         const fabricHint = fabricInfo ? `\n\nUSER PROVIDED FABRIC INFO: ${fabricInfo}` : ''
+        const multiImgHint = urls.length > 1 ? `\n\nYou are given ${urls.length} images of the SAME garment from different angles. Analyze ALL images to create a comprehensive description.` : ''
         systemPrompt = `Act as a technical fashion designer. Analyze this garment image to create a high-fidelity prompt description for an AI image generator.
-Focus STRICTLY on: Garment Type & Fit, Fabric & Texture, Neckline & Sleeves, Design Details, Color.${fabricHint}
+Focus STRICTLY on: Garment Type & Fit, Fabric & Texture, Neckline & Sleeves, Design Details, Color.${fabricHint}${multiImgHint}
 ${mode === 'ghost' ? '\nIGNORE the human model, skin, hair, face, and hands. IGNORE the background.' : ''}
 Product: ${productTitle || 'Fashion garment'}, Category: ${garmentCategory || 'top'}
 OUTPUT ONLY a concise, comma-separated descriptive string.`
       }
+
+      // Her görsel için image block oluştur
+      const imageBlocks = urls.map(url => ({ type: 'image' as const, source: { type: 'url' as const, url } }))
 
       const payload = JSON.stringify({
         model: 'claude-sonnet-4-20250514',
@@ -228,7 +232,7 @@ OUTPUT ONLY a concise, comma-separated descriptive string.`
           role: 'user',
           content: [
             { type: 'text', text: systemPrompt },
-            { type: 'image', source: { type: 'url', url: imageUrl } },
+            ...imageBlocks,
           ],
         }],
       })

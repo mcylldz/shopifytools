@@ -10,7 +10,7 @@ interface Props {
 interface VtonPair {
   id: string
   modelImg: string
-  garmentImg: string
+  garmentImgs: string[]
   category: string
   side: 'front' | 'back'
   mode: 'standard' | 'ghost' | 'fabric'
@@ -59,7 +59,7 @@ export default function VtonTool({ addToast }: Props) {
   const [fetchingGarment, setFetchingGarment] = useState(false)
   const [fetchingModel, setFetchingModel] = useState(false)
 
-  const [selectedGarment, setSelectedGarment] = useState(0)
+  const [selectedGarments, setSelectedGarments] = useState<Set<number>>(new Set([0]))
   const [selectedModel, setSelectedModel] = useState(0)
   const [category, setCategory] = useState('dress')
   const [garmentSide, setGarmentSide] = useState<'front' | 'back'>('front')
@@ -100,7 +100,7 @@ export default function VtonTool({ addToast }: Props) {
       if (data.needsHtml) { addToast({ type: 'info', message: '1688 desteklenmiyor, Shopify URL kullanın' }); return }
       if (!data.success) throw new Error(data.error)
       const imgs = data.product.images || []
-      if (side === 'garment') { setGarmentImages(imgs); setGarmentTitle(data.product.title || ''); setSelectedGarment(0) }
+      if (side === 'garment') { setGarmentImages(imgs); setGarmentTitle(data.product.title || ''); setSelectedGarments(new Set([0])) }
       else { setModelImages(imgs); setModelTitle(data.product.title || ''); setSelectedModel(0) }
       addToast({ type: 'success', message: `${imgs.length} görsel çekildi` })
     } catch (err: any) { addToast({ type: 'error', message: err.message }) }
@@ -109,17 +109,18 @@ export default function VtonTool({ addToast }: Props) {
 
   // ── Pair ekle ──
   const addPair = () => {
-    if (mode === 'standard' && (!garmentImages.length || !modelImages.length)) {
+    const selGarmentImgs = garmentImages.filter((_, i) => selectedGarments.has(i))
+    if (mode === 'standard' && (!selGarmentImgs.length || !modelImages.length)) {
       addToast({ type: 'error', message: 'Standart mod için hem ürün hem model görseli gerekli' }); return
     }
-    if ((mode === 'ghost' || mode === 'fabric') && !garmentImages.length) {
+    if ((mode === 'ghost' || mode === 'fabric') && !selGarmentImgs.length) {
       addToast({ type: 'error', message: 'Ürün görseli gerekli' }); return
     }
     const [provider, model] = aiProvider.split(':')
     setPairs((prev) => [...prev, {
       id: `p_${Date.now()}_${Math.random().toString(36).slice(2, 5)}`,
       modelImg: mode === 'standard' ? modelImages[selectedModel] : '',
-      garmentImg: garmentImages[selectedGarment],
+      garmentImgs: selGarmentImgs,
       category, mode, fabricInfo,
       side: garmentSide,
       aiProvider: provider, falModel: model,
@@ -150,7 +151,7 @@ export default function VtonTool({ addToast }: Props) {
             fetch('/api/vton-generate', { method: 'POST', headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({ action: 'analyze', imageUrl: pair.modelImg, mode: 'model' }) }).then(r => r.json()),
             fetch('/api/vton-generate', { method: 'POST', headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ action: 'analyze', imageUrl: pair.garmentImg, mode: 'garment',
+              body: JSON.stringify({ action: 'analyze', imageUrls: pair.garmentImgs, mode: 'garment',
                 productTitle: garmentTitle, garmentCategory: pair.category, fabricInfo: pair.fabricInfo }) }).then(r => r.json()),
           ])
           if (!mRes.success) throw new Error(mRes.error || 'Model analiz başarısız')
@@ -161,7 +162,7 @@ export default function VtonTool({ addToast }: Props) {
           if (gRes.usage) addCost(gRes.usage.model || 'claude-sonnet-4-20250514', 'VTON Ürün Analiz', gRes.usage.input_tokens, gRes.usage.output_tokens)
         } else {
           const gRes = await fetch('/api/vton-generate', { method: 'POST', headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ action: 'analyze', imageUrl: pair.garmentImg, mode: 'ghost',
+            body: JSON.stringify({ action: 'analyze', imageUrls: pair.garmentImgs, mode: 'ghost',
               productTitle: garmentTitle, garmentCategory: pair.category, fabricInfo: pair.fabricInfo }) }).then(r => r.json())
           if (!gRes.success) throw new Error(gRes.error || 'Analiz başarısız')
           garmentDesc = gRes.description
@@ -170,7 +171,7 @@ export default function VtonTool({ addToast }: Props) {
       }
 
       const prompt = buildPrompt(pair, modelDesc, garmentDesc)
-      const imageUrls = pair.mode === 'standard' ? [pair.modelImg, pair.garmentImg] : [pair.garmentImg]
+      const imageUrls = pair.mode === 'standard' ? [pair.modelImg, ...pair.garmentImgs] : [...pair.garmentImgs]
 
       // ═══ GEMINI DIRECT ═══
       if (pair.aiProvider === 'gemini') {
@@ -325,11 +326,23 @@ export default function VtonTool({ addToast }: Props) {
             {garmentTitle && <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 8 }}>{garmentTitle}</div>}
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(85px, 1fr))', gap: 8, maxHeight: 350, overflowY: 'auto', padding: 4 }}>
               {garmentImages.map((img, idx) => (
-                <div key={idx} onClick={() => setSelectedGarment(idx)} style={{
-                  border: selectedGarment === idx ? '3px solid var(--primary)' : '2px solid var(--border)',
-                  borderRadius: 8, overflow: 'hidden', cursor: 'pointer',
-                  opacity: selectedGarment === idx ? 1 : 0.6, transition: 'all .15s',
-                }}><img src={img} alt="" style={{ width: '100%', height: 110, objectFit: 'cover' }} /></div>
+                <div key={idx} onClick={() => {
+                  setSelectedGarments(prev => {
+                    const next = new Set(prev)
+                    if (next.has(idx)) { if (next.size > 1) next.delete(idx) }
+                    else next.add(idx)
+                    return next
+                  })
+                }} style={{
+                  border: selectedGarments.has(idx) ? '3px solid var(--primary)' : '2px solid var(--border)',
+                  borderRadius: 8, overflow: 'hidden', cursor: 'pointer', position: 'relative',
+                  opacity: selectedGarments.has(idx) ? 1 : 0.5, transition: 'all .15s',
+                }}>
+                  <img src={img} alt="" style={{ width: '100%', height: 110, objectFit: 'cover' }} />
+                  {selectedGarments.has(idx) && (
+                    <div style={{ position: 'absolute', top: 4, right: 4, background: 'var(--primary)', color: '#fff', borderRadius: '50%', width: 20, height: 20, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 11, fontWeight: 700 }}>✓</div>
+                  )}
+                </div>
               ))}
             </div>
           </div>
@@ -420,7 +433,7 @@ export default function VtonTool({ addToast }: Props) {
                         {p.modelImg ? <img src={p.modelImg} alt="" style={{ width: 50, height: 65, objectFit: 'cover', borderRadius: 6 }} /> : '—'}
                       </td>
                       <td style={{ padding: 8 }}>
-                        <img src={p.garmentImg} alt="" style={{ width: 50, height: 65, objectFit: 'cover', borderRadius: 6 }} />
+                        <img src={p.garmentImgs[0]} alt="" style={{ width: 50, height: 65, objectFit: 'cover', borderRadius: 6 }} />
                       </td>
                       <td style={{ padding: 8, fontSize: 11 }}>{p.mode}</td>
                       <td style={{ padding: 8, fontSize: 10 }}>{p.aiProvider === 'gemini' ? '🔵' : '🟢'} {p.falModel}</td>
