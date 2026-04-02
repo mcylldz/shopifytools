@@ -315,7 +315,7 @@ Since this will be used in text-to-video mode (no image reference), your prompt 
 - Every visual detail must be in the text prompt itself
 - Describe the garment as if the reader has never seen it
 - ALL of the above must be written in TURKISH.`
-      }`
+      }
 
       // Build image blocks for all selected images
       const imageBlocks: any[] = []
