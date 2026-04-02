@@ -342,7 +342,10 @@ export default function VideoAdTool({ addToast }: Props) {
         const videoId = soraData.id
         if (!videoId) throw new Error('Sora video ID alinamadi')
 
+        // Poll until completed, then get video URL
         setJobStatus('polling')
+        let videoUrl: string | null = null
+
         for (let attempt = 0; attempt < 120; attempt++) {
           if (cancelRef.current) return
           await new Promise(r => setTimeout(r, 5000))
@@ -357,42 +360,42 @@ export default function VideoAdTool({ addToast }: Props) {
           if (!pollData.success) throw new Error(pollData.error || 'Sora poll hatasi')
 
           if (pollData.done) {
-            let videoUrl = pollData.videoUrl
-
-            // Download video via sora_download (handles binary + redirects)
-            // Retry up to 6 times with increasing delay — video may not be instantly available
-            if (!videoUrl) {
-              setStatusText('Sora video indiriliyor...')
-              for (let dlAttempt = 0; dlAttempt < 6; dlAttempt++) {
-                if (cancelRef.current) return
-                const waitSec = (dlAttempt + 1) * 5 // 5s, 10s, 15s, 20s, 25s, 30s
-                if (dlAttempt > 0) {
-                  setStatusText(`Sora video indiriliyor... (deneme ${dlAttempt + 1}/6, ${waitSec}s bekleniyor)`)
-                  await new Promise(r => setTimeout(r, waitSec * 1000))
-                }
-                try {
-                  const dlRes = await fetch('/api/video-generate', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ action: 'sora_download', videoId }),
-                  })
-                  const dlData = await safeJson(dlRes)
-                  if (dlData.success && dlData.videoUrl) { videoUrl = dlData.videoUrl; break }
-                  if (dlData.retriable) continue // not ready yet, retry
-                  if (!dlData.success && !dlData.retriable) throw new Error(dlData.error || 'Download basarisiz')
-                } catch (dlErr: any) {
-                  if (dlAttempt === 5) throw dlErr
-                }
-              }
-            }
-
-            if (!videoUrl) throw new Error('Sora video indirilemedi — 6 deneme yapildi')
-            addCost(soraModelId, 'Sora Video')
-            finishJob(videoUrl)
-            return
+            videoUrl = pollData.videoUrl || null
+            break
           }
         }
-        throw new Error('Sora timeout (10 dk)')
+
+        // If poll didn't give URL, try sora_download with retries
+        if (!videoUrl) {
+          setStatusText('Sora video URL aliniyor...')
+          for (let dlAttempt = 0; dlAttempt < 8; dlAttempt++) {
+            if (cancelRef.current) return
+            if (dlAttempt > 0) {
+              setStatusText(`Video URL aliniyor... (deneme ${dlAttempt + 1}/8)`)
+              await new Promise(r => setTimeout(r, 5000))
+            }
+            try {
+              const dlRes = await fetch('/api/video-generate', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ action: 'sora_download', videoId }),
+              })
+              const dlData = await safeJson(dlRes)
+              if (dlData.success && dlData.videoUrl) {
+                videoUrl = dlData.videoUrl
+                break
+              }
+              // Keep retrying for any non-success
+            } catch {
+              // Keep retrying on network errors
+            }
+          }
+        }
+
+        if (!videoUrl) throw new Error('Sora video URL alinamadi. Lütfen birkac dakika sonra tekrar deneyin.')
+        addCost(soraModelId, 'Sora Video')
+        finishJob(videoUrl)
+        return
       }
 
       // ═══ FAL Models (Kling / MiniMax) ═══

@@ -836,68 +836,100 @@ Simdi yukardaki PROMPT FORMATI'na uygun, 80-150 kelime arasi, tek paragraf halin
 
     // ═══════════ SORA — Download Video Content ═══════════
     if (action === 'sora_download') {
-      if (!OPENAI_KEY) throw new Error('OPENAI_API_KEY eksik')
+      if (!OPENAI_KEY) {
+        return { statusCode: 200, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ success: false, error: 'OPENAI_API_KEY eksik' }) }
+      }
       const { videoId } = body
-      if (!videoId) throw new Error('videoId gerekli')
+      if (!videoId) {
+        return { statusCode: 200, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ success: false, error: 'videoId gerekli' }) }
+      }
 
       console.log(`[video] sora_download videoId=${videoId}`)
 
-      const videoData = await new Promise<{ status: number; buffer: Buffer; headers: Record<string, string> }>((resolve, reject) => {
-        const req = https.request({
-          hostname: 'api.openai.com',
-          path: `/v1/videos/${videoId}/content`,
-          method: 'GET',
-          headers: { 'Authorization': `Bearer ${OPENAI_KEY}` },
-        }, (res) => {
-          if (res.statusCode && res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
-            resolve({ status: res.statusCode, buffer: Buffer.alloc(0), headers: { location: res.headers.location as string } })
-            res.resume()
-            return
-          }
-          const chunks: Buffer[] = []
-          res.on('data', (chunk: Buffer) => chunks.push(chunk))
-          res.on('end', () => resolve({
-            status: res.statusCode || 500,
-            buffer: Buffer.concat(chunks),
-            headers: { 'content-type': (res.headers['content-type'] || '') as string },
-          }))
+      try {
+        const videoData = await new Promise<{ status: number; buffer: Buffer; location?: string; contentType?: string }>((resolve, reject) => {
+          const req = https.request({
+            hostname: 'api.openai.com',
+            path: `/v1/videos/${videoId}/content`,
+            method: 'GET',
+            headers: { 'Authorization': `Bearer ${OPENAI_KEY}` },
+          }, (res) => {
+            console.log(`[video] sora_download /content status=${res.statusCode}, location=${res.headers.location || 'none'}`)
+
+            // ANY redirect — capture location
+            if (res.statusCode && res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
+              resolve({ status: res.statusCode, buffer: Buffer.alloc(0), location: res.headers.location as string })
+              res.resume()
+              return
+            }
+            const chunks: Buffer[] = []
+            res.on('data', (chunk: Buffer) => chunks.push(chunk))
+            res.on('end', () => resolve({
+              status: res.statusCode || 500,
+              buffer: Buffer.concat(chunks),
+              contentType: (res.headers['content-type'] || '') as string,
+            }))
+          })
+          req.on('error', reject)
+          req.setTimeout(30000, () => { req.destroy(); reject(new Error('timeout')) })
+          req.end()
         })
-        req.on('error', reject)
-        req.setTimeout(55000, () => { req.destroy(); reject(new Error('Sora download timeout')) })
-        req.end()
-      })
 
-      if (videoData.headers.location) {
+        // Got redirect URL — this is the video
+        if (videoData.location) {
+          console.log(`[video] sora_download got redirect: ${videoData.location.substring(0, 100)}`)
+          return {
+            statusCode: 200,
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ success: true, videoUrl: videoData.location }),
+          }
+        }
+
+        // Got 200 with binary data — return as base64 (if small enough)
+        if (videoData.status === 200 && videoData.buffer.length > 1000) {
+          // Check if it's JSON first
+          const textPreview = videoData.buffer.toString('utf-8').substring(0, 50)
+          if (textPreview.trim().startsWith('{')) {
+            try {
+              const jsonData = JSON.parse(videoData.buffer.toString('utf-8'))
+              const url = jsonData.url || jsonData.download_url || jsonData.video_url || null
+              if (url) {
+                return { statusCode: 200, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ success: true, videoUrl: url }) }
+              }
+            } catch { /* not json */ }
+          }
+
+          // Binary video — only if under 5MB (Netlify response limit)
+          if (videoData.buffer.length < 5 * 1024 * 1024) {
+            const base64 = videoData.buffer.toString('base64')
+            return {
+              statusCode: 200,
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ success: true, videoUrl: `data:${videoData.contentType || 'video/mp4'};base64,${base64}` }),
+            }
+          }
+
+          // Too large for base64 — this shouldn't happen with 302 flow
+          return { statusCode: 200, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ success: false, error: `Video cok buyuk (${Math.round(videoData.buffer.length / 1024 / 1024)}MB)` }) }
+        }
+
+        // Any other status — return as retriable
+        const bodyStr = videoData.buffer.toString('utf-8').substring(0, 200)
+        console.log(`[video] sora_download non-success: status=${videoData.status}, body=${bodyStr}`)
         return {
           statusCode: 200,
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ success: true, videoUrl: videoData.headers.location }),
+          body: JSON.stringify({ success: false, error: `Sora content status ${videoData.status}` }),
         }
-      }
 
-      if (videoData.status === 200 && videoData.buffer.length > 1000) {
-        const base64 = videoData.buffer.toString('base64')
-        const mimeType = videoData.headers['content-type'] || 'video/mp4'
+      } catch (e: any) {
+        console.error(`[video] sora_download error: ${e.message}`)
         return {
           statusCode: 200,
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ success: true, videoUrl: `data:${mimeType};base64,${base64}` }),
+          body: JSON.stringify({ success: false, error: e.message }),
         }
       }
-
-      // Not ready yet or error
-      const bodyPreview = videoData.buffer.toString('utf-8').substring(0, 300)
-      console.log(`[video] sora_download failed: status=${videoData.status}, size=${videoData.buffer.length}, body=${bodyPreview}`)
-
-      if (videoData.status === 202 || videoData.status === 404) {
-        return {
-          statusCode: 200,
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ success: false, retriable: true, error: `Video henuz hazir degil (${videoData.status})` }),
-        }
-      }
-
-      throw new Error(`Sora video indirilemedi (status: ${videoData.status}, body: ${bodyPreview})`)
     }
 
     // ═══════════ DOWNLOAD PROXY ═══════════
