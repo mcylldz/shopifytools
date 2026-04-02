@@ -26,8 +26,28 @@ function httpsRequest(options: https.RequestOptions, payload?: string): Promise<
   })
 }
 
+// ═══════════ PROMPT STRUCTURE TEMPLATE ═══════════
+// Every prompt MUST follow this structure for consistency
+const PROMPT_STRUCTURE = `
+PROMPT FORMATI — BU YAPIYA KESINLIKLE UY:
+Urettigin prompt su 7 bolumu SIRASIYLA icermeli (basliklari YAZMA, sadece icerigi yaz, tek paragraf halinde akici bir prompt olsun):
+
+1. FORMAT & SURE: "Dikey 9:16, X saniye." ile basla
+2. HOOK KARESI (ilk 0.5 saniye): Videonun ilk karesinde ne gorulecek? Bu kare scroll'u durdurmali. Spesifik ol — hangi gorsel ogeyle aciliyor?
+3. SAHNE & ORTAM: Nerede geciyor? Isik kurulumu nasil? Renk sicakligi, golge yonu, ortam detaylari
+4. URUN DETAYI: Giysi/urunun rengi, kumasi, kesimi, deseni, ozel detaylari (dugme, fermuar, islemeler). Kumas isikla nasil etkilesiyor?
+5. HAREKET KOREOGRAFISI: Kim/ne hareket ediyor? Kamera hareketi (dolly, pan, tracking, handheld)? Kumas fizigi (dalganma, parlama, dokunma)?
+6. RENK GRADING & MOOD: Sicak/soguk tonlar, kontrast, lifted blacks, Instagram filtresi hissi — spesifik tarif et
+7. SON KARE: Video nasil bitiyor? Son karede ne gorulecek?
+
+ONEMLI KURALLAR:
+- TURKCE yaz, Ingilizce kelime KULLANMA
+- Tek paragraf, akici, sinematik dilde yaz
+- Teknik sinema terimleri kullanabilirsin ama Turkce acikla
+- Prompt 80-150 kelime arasi olmali — ne cok kisa ne cok uzun
+- SADECE prompt metnini yaz, baslik/aciklama/numara YAZMA`
+
 // ═══════════ Video Ad Modes — Higgsfield-Quality Presets ═══════════
-// Each mode has model-specific system prompts optimized for that model's strengths
 interface ModePrompts {
   base: string
   kling?: string
@@ -37,217 +57,237 @@ interface ModePrompts {
 }
 
 const VIDEO_MODE_PROMPTS: Record<string, ModePrompts> = {
-  // ── Higgsfield-Style Modes ──
   'simple-ugc': {
-    base: `You are an elite Meta Andromeda video ad director specializing in UGC-style content for women's fashion e-commerce.
-Create a SIMPLE UGC video prompt: authentic, handheld feel, casual and relatable.
-Key elements:
-- Slight natural camera shake (not stabilized, feels phone-recorded)
-- Natural indoor/outdoor lighting (window light, golden hour, NOT studio)
-- Casual posing: adjusting clothes, checking mirror, quick spin
-- Real-world environment: bedroom, cafe, street, fitting room
-- First 0.5s: immediate product reveal, no slow intros
-- 2-4 seconds total, vertical 9:16 format
-- Warm color grade, slightly lifted blacks (Instagram aesthetic)
-- NO text overlays in the video prompt itself
-Output ONLY the prompt text, nothing else.`,
-    kling: `Additional for Kling: Keep motion descriptions simple and physical. Focus on one clear action (e.g., "woman adjusts collar while looking at phone camera"). Use words: handheld, natural, casual, authentic. Avoid complex camera movements.`,
-    veo: `Additional for Veo: Describe the scene cinematically but with UGC texture. Mention "shot on iPhone", "natural ambient light", "slight handheld movement". Veo responds well to environmental detail — describe the room/space.`,
-    sora: `Additional for Sora: Focus on physics-based natural movement. Describe fabric drape, hair movement, body mechanics realistically. Sora excels at naturalistic motion — lean into that.`,
+    base: `Sen kadin giyim e-ticaret icin Meta Andromeda uyumlu UGC tarzi video reklam yonetmenisin.
+SIMPLE UGC modu: Otantik, telefon cekimi havasi, dogal ve samimi.
+
+ZORUNLU OGELER:
+- Elde tutulan telefon kamerasi — hafif dogal titreme (stabilize DEGIL)
+- Dogal ic mekan/dis mekan isigi (pencere isigi, golden hour — studio DEGIL)
+- Gunluk poz: kiyafeti duzeltme, aynaya bakma, hizli don, selfie acisi
+- Gercek ortam: yatak odasi, soyunma kabini, kafe, sokak
+- HOOK: Ilk 0.5 saniyede urun aninda gorulmeli — yavas giris YOK
+- Sicak renk grading, hafif lifted blacks, Instagram UGC estetigi
+- Kumas hareketi dogal olmali — her harekette kumas tepki vermeli
+- Son kare: ozguvenli bir an (gulums, kameraya bakis, begenme ifadesi)`,
+    kling: `Kling icin: Tek net hareket odakli prompt yaz. "Manken aynada kravatini duzeltiyor, hizla donerek etegin ucusunu gosteriyor" gibi. Basit fiziksel aksiyonlar. Karmasik kamera hareketi KULLANMA.`,
+    veo: `Veo icin: Sahneyi sinematik ama UGC dokusunda tarif et. "Telefon kamerasi", "dogal ortam isigi", "hafif elde tutulan titreme" ifadelerini kullan. Ortam detaylarini tarif et — odanin icindekiler, isik kaynaklari.`,
+    sora: `Sora icin: Kumas fizigine ve dogal harekete odaklan. Kisi tarifi YAPMA — "manken" de, fiziksel ozellik BELIRTME. Sadece giysi, kumas, isik ve ortam tarif et.`,
+    minimax: `MiniMax icin: Kisa ve net prompt yaz. Ana aksiyonu ve ortami tarif et. MiniMax prompt optimizer'i kullanacak, cok detaya girme.`,
   },
 
   'clean-minimal': {
-    base: `You are an elite Meta Andromeda video ad director specializing in clean minimalist e-commerce content for women's fashion.
-Create a CLEAN MINIMAL video prompt: white/neutral backdrop, product-centric, modern.
-Key elements:
-- Pure white or soft cream cyclorama background
-- Single dramatic shadow, crisp directional light
-- Slow, deliberate product movement (gentle spin or float)
-- Negative space emphasis — product occupies 60% of frame
-- Sharp focus on product, everything else soft
-- First 0.5s: product already in frame, instant visual clarity
-- 2-4 seconds, vertical 9:16
-- High-key lighting, desaturated palette
-Output ONLY the prompt text, nothing else.`,
-    kling: `Additional for Kling: Use minimal motion keywords. "Slow rotation", "gentle float", "subtle fabric sway". Keep CFG high for clean output. Specify "white studio background, single shadow".`,
-    veo: `Additional for Veo: Veo handles studio environments well. Describe "infinite white cyclorama", "soft box lighting from upper right", "product centered in frame". Be precise about shadow direction and intensity.`,
-    sora: `Additional for Sora: Describe the physics of the product movement. "Garment slowly rotates on invisible platform, fabric catches air gently". Sora needs physicality even in minimal scenes.`,
+    base: `Sen kadin giyim e-ticaret icin minimalist urun video yonetmenisin.
+CLEAN MINIMAL modu: Beyaz/notr arka plan, urun odakli, modern ve temiz.
+
+ZORUNLU OGELER:
+- Saf beyaz veya yumusak krem cyclorama arka plan
+- Tek dramatik golge, net yonlu isik (softbox veya pencere)
+- Yavas, kontrol hareket: nazik donus, hafif yuzme, kumas sallantisi
+- Negatif alan vurgusu — urun karenin %60-70'ini kaplamali
+- Urune keskin fokus, arka plan yumusak
+- HOOK: Ilk 0.5 saniyede urun zaten karede, aninda gorsel netlik
+- High-key aydinlatma, desature palet
+- Kumas detayi: isikla etkilesimi, dokunun gorsel hissi
+- Son kare: urun tam merkezde, mukemmel kompozisyon`,
+    kling: `Kling icin: Minimal hareket anahtar kelimeleri kullan. "Yavas donus", "nazik suzulme", "ince kumas sallantisi". Temiz cikis icin "beyaz studio arka plan, tek golge" belirt.`,
+    veo: `Veo icin: "Sonsuz beyaz cyclorama", "sag ustten softbox isik", "urun karede ortalanmis" gibi studio detaylari ver. Golge yonu ve yogunlugu hakkinda spesifik ol.`,
+    sora: `Sora icin: Urunun fiziksel hareketini tarif et. "Giysi gorunmez platformda yavasca donuyor, kumas havay hafifce yakalyor" gibi. Kisi tarifi YAPMA.`,
+    minimax: `MiniMax icin: "Beyaz arka plan, urun yavasca donuyor, temiz studio isigi" gibi kisa ve oз prompt yaz.`,
   },
 
   'luxury': {
-    base: `You are an elite Meta Andromeda video ad director specializing in luxury fashion e-commerce content.
-Create a LUXURY video prompt: cinematic, dramatic, aspirational, high-end.
-Key elements:
-- Rich, dramatic lighting: Rembrandt, butterfly, or rim lighting
-- Dark moody background with selective illumination on product
-- Slow-motion fabric movement (silk drape, cashmere texture)
-- Dolly-in or slow push camera movement toward product
-- Depth of field: razor-thin focus on product details
-- Golden/warm highlights with deep shadow contrast
-- First 0.5s: dramatic reveal with light sweep across product
-- 3-5 seconds, vertical 9:16
-- Premium materials feeling: gleam, sheen, texture depth
-Output ONLY the prompt text, nothing else.`,
-    kling: `Additional for Kling: Emphasize dramatic lighting with keywords: "cinematic rim light", "chiaroscuro", "dark luxury studio". Use "slow motion", "dramatic reveal". Kling handles dramatic lighting well.`,
-    veo: `Additional for Veo: Describe the full cinematic setup: "Arri-style key light from 45 degrees", "negative fill on shadow side", "slow dolly push". Veo excels at cinematic language and camera movements.`,
-    sora: `Additional for Sora: Focus on material physics: "silk catches light as it falls in slow motion", "fabric tension and release". Describe the interplay of light and material texture.`,
+    base: `Sen luks moda e-ticaret icin sinematik video yonetmenisin.
+LUXURY modu: Dramatik, sinematik, aspirasyonel, premium his.
+
+ZORUNLU OGELER:
+- Zengin dramatik aydinlatma: Rembrandt, kelebek veya rim isik
+- Karanlik, ruh halini yansitan arka plan, urun uzerinde secici aydinlatma
+- Agir cekim kumas hareketi: ipek akisi, kasmir dokusu, saten parlamasi
+- Dolly-in veya yavas push kamera hareketi urune dogru
+- Alan derinligi: jilet gibi ince fokus urun detaylarinda
+- Altin/sicak vurgular, derin golge kontrasti
+- HOOK: Ilk 0.5 saniyede isik suzmesiyle dramatik reveal
+- Premium malzeme hissi: parlaklk, isiltii, doku derinligi
+- Son kare: urunun en luks acisindan yakin cekim, isik yansimasi
+- Renk grading: derin siyahlar, sicak altinsi vurgular, sinematik kontrast`,
+    kling: `Kling icin: Dramatik isik anahtar kelimeleri vurgula: "sinematik rim isik", "chiaroscuro", "karanlik luks studio". "Agir cekim", "dramatik reveal" kullan.`,
+    veo: `Veo icin: Tam sinematik kurulumu tarif et: "45 dereceden Arri tarzi key light", "golge tarafinda negatif fill", "yavas dolly push". Veo sinematik dilde cok basarili.`,
+    sora: `Sora icin: Malzeme fizigine odaklan: "ipek agir cekimde duserken isigi yakaliyor", "kumas gerginligi ve birakilis". Kisi tarifi YAPMA, sadece urun ve isik.`,
+    minimax: `MiniMax icin: "Karanlik studio, dramatik isik, urun agir cekimde gosteriliyor" gibi net luks atmosfer tarifi yaz.`,
   },
 
   'product-story': {
-    base: `You are an elite Meta Andromeda video ad director specializing in product narrative content for women's fashion.
-Create a PRODUCT STORY video prompt: journey from flat product to styled look, mini narrative arc.
-Key elements:
-- Opening: product laid flat or folded beautifully
-- Transition: hands picking up / unfolding the garment
-- Reveal: product being held up, styled, or worn
-- Emotional beat: confidence moment, fabric touch appreciation
-- Camera follows the story: starts overhead, moves to eye-level
-- Warm, editorial color grade
-- First 0.5s: beautiful flat-lay composition hooks the viewer
-- 3-5 seconds, vertical 9:16
-- Tactile focus: fingers touching fabric, buttons, details
-Output ONLY the prompt text, nothing else.`,
-    kling: `Additional for Kling: Keep the narrative simple and action-based. "Hands unfold garment on marble surface, lift it to camera, fabric flows". Kling needs clear sequential actions.`,
-    veo: `Additional for Veo: Describe the story as a single continuous shot. "Camera starts overhead on styled flat-lay, slowly tilts as hands enter frame and lift the garment". Veo handles continuous camera movements well.`,
-    sora: `Additional for Sora: Focus on the physics of each transition. "Paper-thin fabric unfolds against gravity, hands guide it upward, material catches backlight as it rises". Sora loves physical interactions.`,
+    base: `Sen moda e-ticaret icin urun hikayesi anlatan video yonetmenisin.
+PRODUCT STORY modu: Duz urunden giyilmis haline gecis, mini hikaye arki.
+
+ZORUNLU OGELER:
+- Acilis: urun guzelce katlanmis veya duz yayilmis (flat-lay)
+- Gecis: eller alip aciyor/kaldiriyor, kumas aciliyor
+- Reveal: urun havada tutulus, giyilmis veya stilize edilmis hali
+- Duygusal an: ozguven ani, kumasa dokunma, begenme
+- Kamera hikayeyi takip eder: ustten baslar, goz hizasina gelir
+- Sicak, editorial renk grading
+- HOOK: Ilk 0.5 saniyede guzel flat-lay kompozisyonu
+- Dokunsal odak: parmaklar kumasa dokunuyor, dugmelere, detaylara
+- Son kare: urunun en etkileyici hali — giyilmis veya stilize
+- Kumas fizigi: acilirken, kalkarken dogal hareket etmeli`,
+    kling: `Kling icin: Hikayeyi basit ve aksiyon bazli tut. "Eller mermer yüzeyde giysiyi aciyor, kameraya kaldiriyor, kumas akiyor" gibi. Net sirali aksiyonlar.`,
+    veo: `Veo icin: Tek kesintisiz cekim olarak tarif et. "Kamera flat-lay uzerinde ustten baslar, eller kadraja girip giysiyi kaldirirken yavasca egilir" gibi.`,
+    sora: `Sora icin: Her gecisin fizigine odaklan. "Ince kumas yercekimine karsi yukseliyor, eller yukari yonlendiriyor, malzeme arka isikta parlıyor". Kisi tarifi YAPMA.`,
+    minimax: `MiniMax icin: "Flat-lay'den giyilmis hale gecis, eller giysiyi aciyor ve kaldiriyor" gibi net hikaye anlat.`,
   },
 
   'cozy-morning': {
-    base: `You are an elite Meta Andromeda video ad director specializing in lifestyle fashion content with a cozy, warm aesthetic.
-Create a COZY MORNING video prompt: warm, intimate, soft, lifestyle-driven.
-Key elements:
-- Golden morning light streaming through sheer curtains
-- Warm color temperature (2700K feel), soft shadows
-- Intimate setting: bed, window seat, breakfast nook, bathroom mirror
-- Gentle, slow movements: stretching, wrapping garment around body, coffee in hand
-- Bokeh elements: out-of-focus plants, mugs, bedding
-- Soft focus overall with occasional sharp moments on product
-- First 0.5s: warm light and cozy environment establish mood instantly
-- 3-5 seconds, vertical 9:16
-- Hygge aesthetic: comfort, warmth, self-care moment
-Output ONLY the prompt text, nothing else.`,
-    kling: `Additional for Kling: Use warm, atmospheric keywords. "Soft morning sun through curtains", "gentle stretch in knit sweater", "warm bokeh background". Keep movements slow and gentle.`,
-    veo: `Additional for Veo: Paint the full scene: "Golden hour light at 15-degree angle through linen curtains, dust particles visible in beam, woman in soft knitwear turns toward camera". Veo responds well to atmospheric descriptions.`,
-    sora: `Additional for Sora: Describe the physics of comfort: "fabric drapes loosely over shoulders, steam rises from mug in background, curtain sways in gentle breeze". Sora handles atmospheric physics naturally.`,
+    base: `Sen moda e-ticaret icin sicak yasam tarzi videosu yonetmenisin.
+COZY MORNING modu: Sicak, samimi, yumusak, yasam tarzi odakli.
+
+ZORUNLU OGELER:
+- Altin sabah isigi ince perdelerden suziluyor
+- Sicak renk sicakligi (2700K hissi), yumusak golgeler
+- Samimi ortam: yatak, pencere koltugu, kahvalti kosesi, banyo aynasi
+- Nazik yavas hareketler: gerinme, giysiyi sarma, kahve tutma
+- Bokeh ogeleri: odak disi bitkiler, kupalar, yatak ortuleri
+- Yumusak fokus, urun anlarinda keskinlesme
+- HOOK: Ilk 0.5 saniyede sicak isik ve rahat ortam hemen mood kurar
+- Hygge estetigi: konfor, sicaklik, kendine bakim ani
+- Son kare: huzurlu, rahat bir an — kahve icme, pencereye bakma
+- Renk grading: cok sicak tonlar, yumusak kontrastlar, kremsi vurgular`,
+    kling: `Kling icin: Sicak atmosferik anahtar kelimeler kullan. "Perdelerden yumusak sabah gunesi", "orgu kazakta nazik gerinme", "sicak bokeh arka plan". Hareketler yavas ve nazik.`,
+    veo: `Veo icin: Tam sahneyi boya: "15 dereceden keten perdeler arasından altin saat isigi, isik huzmesinde toz zerreleri goruluyor, yumusak triko icinde manken kameraya donuyor". Veo atmosferik tariflere iyi yanit verir.`,
+    sora: `Sora icin: Konforun fizigini tarif et: "kumas omuzlarda gevek dusuyor, arka planda kupadan buhar yukseliyor, perde hafif esintide sallaniyor". Kisi tarifi YAPMA.`,
+    minimax: `MiniMax icin: "Sicak sabah isigi, rahat ortam, giysi dogal hareketiyle gosteriliyor" gibi atmosfer odakli kisa prompt yaz.`,
   },
 
   'elegant-minimal': {
-    base: `You are an elite Meta Andromeda video ad director specializing in sophisticated, refined fashion content.
-Create an ELEGANT MINIMAL video prompt: understated luxury, refined movement, sophisticated.
-Key elements:
-- Neutral toned backdrop: warm grey, soft beige, muted stone
-- Single elegant gesture: hand on fabric, shoulder turn, graceful step
-- Architectural negative space with deliberate asymmetric composition
-- Soft directional light with gentle gradient falloff
-- Slow, purposeful camera drift (not static, not busy)
-- Muted, desaturated palette with one subtle color accent from the product
-- First 0.5s: striking composition with instant visual sophistication
-- 3-5 seconds, vertical 9:16
-- Editorial fashion magazine quality
-Output ONLY the prompt text, nothing else.`,
-    kling: `Additional for Kling: Use refined motion keywords. "Slow shoulder turn", "graceful hand gesture across fabric", "gentle camera drift right". Minimal action, maximum elegance.`,
-    veo: `Additional for Veo: Describe like a fashion film: "Wes Anderson-inspired symmetry breaks as model turns 15 degrees, soft fill light creates gentle gradient on neutral linen backdrop". Veo responds to cinematic references.`,
-    sora: `Additional for Sora: Focus on one refined motion: "fabric tension as shoulder rotates, creating a cascade of gentle folds that catch diffused side light". Sora captures subtle motion beautifully.`,
+    base: `Sen sofistike moda e-ticaret icin rafine video yonetmenisin.
+ELEGANT MINIMAL modu: Alti cizilmemis luks, rafine hareket, sofistike.
+
+ZORUNLU OGELER:
+- Notr tonlu arka plan: sicak gri, yumusak bej, mat tas rengi
+- Tek zarif jest: kumasa el, omuz donusu, zarifice adim
+- Mimari negatif alan, bilingli asimetrik kompozisyon
+- Yumusak yonlu isik, nazik gradyan gecisi
+- Yavas, amaicli kamera kaymasi (statik degil, yogun degil)
+- Soluk, desature palet, urunden tek ince renk aksan
+- HOOK: Ilk 0.5 saniyede carpici kompozisyon, aninda gorsel sofistikasyon
+- Editorial moda dergisi kalitesi
+- Son kare: mukemmel kompozisyonda zarafet — tek donmus an
+- Renk grading: mat, desature, ince sicaklik, dusuik kontrast`,
+    kling: `Kling icin: Rafine hareket anahtar kelimeleri kullan. "Yavas omuz donusu", "kumas uzerinde zarif el hareketi", "kameranin saga nazik kaymasi". Minimum aksiyon, maksimum zarafet.`,
+    veo: `Veo icin: Moda filmi gibi tarif et: "Simetrik kompozisyon manken 15 derece donerken bozuluyor, notr keten arka planda yumusak fill light nazik gradyan olusturuyor". Veo sinematik referanslara yanit verir.`,
+    sora: `Sora icin: Tek rafine harekete odaklan: "omuz donerken kumas gerginligi, dagilan yumusak kivrimlarda yan isik dans ediyor". Kisi tarifi YAPMA.`,
+    minimax: `MiniMax icin: "Notr arka plan, zarif tek hareket, editorial kalite" gibi minimal ama sofistike prompt yaz.`,
   },
 
-  // ── Original Styles (Enhanced) ──
   'showcase-spin': {
-    base: `You are an elite Meta Andromeda video ad director for women's fashion e-commerce.
-Create a SHOWCASE SPIN video prompt: smooth 360-degree product rotation.
-Key elements:
-- Smooth, continuous 360° rotation on invisible turntable
-- Studio lighting: 3-point setup with soft key, fill, and rim
-- Clean background (white, gradient, or minimal context)
-- Fabric movement during rotation: natural flow, no stiffness
-- Product occupies 70-80% of frame
-- First 0.5s: product already spinning, immediate visual interest
-- 3-5 seconds for full rotation, vertical 9:16
-- Sharp focus throughout rotation
-Output ONLY the prompt text, nothing else.`,
-    kling: `Additional for Kling: "Smooth continuous 360 rotation, studio lighting, white background". Kling handles rotations well with simple prompts.`,
-    veo: `Additional for Veo: Describe the turntable mechanics: "Product on invisible rotating platform, completing full 360° rotation. Three-point lighting setup with soft shadows". Veo likes mechanical precision.`,
-    sora: `Additional for Sora: Focus on fabric physics during rotation: "garment rotates smoothly, fabric hem lifts slightly from centrifugal movement, catching light at each angle". Sora handles rotation physics naturally.`,
+    base: `Sen moda e-ticaret icin urun vitrin videosu yonetmenisin.
+SHOWCASE SPIN modu: Duizgun 360 derece urun donusu.
+
+ZORUNLU OGELER:
+- Duizgun, surekli 360 derece donus gorunmez donme tablasi uzerinde
+- Studio aydinlatma: 3 nokta kurulum — yumusak key, fill ve rim isik
+- Temiz arka plan (beyaz, gradyan veya minimal baglam)
+- Donus sirasinda kumas hareketi: dogal akis, sertlik yok
+- Urun karenin %70-80'ini kapliyor
+- HOOK: Ilk 0.5 saniyede urun zaten donuyor, aninda gorsel ilgi
+- Tam donus icin 3-5 saniye
+- Donus boyunca keskin fokus
+- Son kare: baslangic pozisyonuna donmus, kusursuz donus
+- Kumas fizigi: merkezkaç kuvvetiyle hafif havalanma, eteklerde dalga`,
+    kling: `Kling icin: "Duizgun surekli 360 donus, studio isigi, beyaz arka plan". Kling donusleri basit promptlarla iyi yapar.`,
+    veo: `Veo icin: Donme mekanigini tarif et: "Gorunmez donen platform uzerinde urun tam 360 derece donusu tamamliyor. Yumusak golgeli uc noktali isik kurulumu".`,
+    sora: `Sora icin: Donus sirasinda kumas fizigine odaklan: "giysi duizgunce donuyor, kumas etegi merkezkac hareketiyle hafifce kalkiyor, her acida isigi yakalıyor". Kisi tarifi YAPMA.`,
+    minimax: `MiniMax icin: "Beyaz studio, urun 360 derece donuyor, temiz isik" gibi basit donus prompt'u yaz.`,
   },
 
   'model-walk': {
-    base: `You are an elite Meta Andromeda video ad director for women's fashion.
-Create a MODEL WALK video prompt: confident runway or street-style walk.
-Key elements:
-- Confident, editorial walk: purposeful strides, slight hip sway
-- Dynamic camera: tracking shot following the model or she walks toward camera
-- Fabric movement: natural flow with each step, hem swing
-- Urban or minimal backdrop: clean street, concrete wall, studio corridor
-- Fashion editorial color grade: slightly desaturated with contrast
-- First 0.5s: model already in motion, immediate dynamism
-- 3-5 seconds, vertical 9:16, model centered
-- Show full outfit with movement
-Output ONLY the prompt text, nothing else.`,
-    kling: `Additional for Kling: "Model walks confidently toward camera, editorial fashion style, tracking shot". Keep it action-focused. Kling needs clear motion direction.`,
-    veo: `Additional for Veo: Describe the shot setup: "Steadicam tracking shot at waist height, model walks toward camera on grey concrete backdrop, natural side light creates depth". Veo handles complex camera movements.`,
-    sora: `Additional for Sora: Describe the biomechanics: "confident walk with natural arm swing, fabric reacts to each stride with slight delay, heels click on polished floor". Sora excels at human motion.`,
+    base: `Sen moda e-ticaret icin model yuruyusu videosu yonetmenisin.
+MODEL WALK modu: Ozguvenli podyum veya sokak tarzi yuruyus.
+
+ZORUNLU OGELER:
+- Ozguvenli editorial yuruyus: kararli adimlar, hafif kalca sallantisi
+- Dinamik kamera: mankeni takip eden tracking shot veya kameraya dogru yuruyus
+- Kumas hareketi: her adimda dogal akis, etek sallantisi
+- Sehirsel veya minimal arka plan: temiz sokak, beton duvar, studio koridor
+- Moda editorial renk grading: hafif desature, kontrastli
+- HOOK: Ilk 0.5 saniyede manken zaten hareket halinde, aninda dinamizm
+- Tam kiyafeti hareketli gosterme
+- Son kare: mankenin en ozguvenli ani — durup kameraya bakis veya yuruyuse devam
+- Kumas fizigi: adim gecikmesiyle kumas tepki veriyor`,
+    kling: `Kling icin: "Manken ozguvenle kameraya dogru yuruyор, editorial moda stili, tracking cekim". Aksiyon odakli tut. Kling net hareket yonu istiyor.`,
+    veo: `Veo icin: Cekim kurulumunu tarif et: "Bel hizasinda steadicam tracking cekim, manken gri beton arka planda kameraya dogru yuruyоr, dogal yan isik derinlik yaratyor".`,
+    sora: `Sora icin: Yuruyus fizigini tarif et: "ozguvenli yuruyus, dogal kol hareketi, kumas her adimda hafif gecikmeyle tepki veriyor". Kisi tarifi YAPMA — sadece hareket ve kumas.`,
+    minimax: `MiniMax icin: "Manken ozguvenle yuruyоr, kumas hareket ediyor, editorial cekim" gibi net aksiyon prompt'u yaz.`,
   },
 
   'lifestyle-scene': {
-    base: `You are an elite Meta Andromeda video ad director for women's fashion lifestyle content.
-Create a LIFESTYLE SCENE video prompt: aspirational real-world setting.
-Key elements:
-- Beautiful real-world location: cafe terrace, coastal walkway, city rooftop, garden
-- Natural golden hour or magic hour lighting
-- Candid, unstaged feeling: laughing, looking away, moving through space
-- Environmental context: coffee cup, book, architecture, nature
-- Cinematic shallow depth of field
-- First 0.5s: establishing the aspirational environment with product visible
-- 3-5 seconds, vertical 9:16
-- Emotionally engaging: viewer wants to be there
-Output ONLY the prompt text, nothing else.`,
-    kling: `Additional for Kling: Keep scenes simple with one clear action in one location. "Woman at cafe terrace, golden hour, touches hair and smiles". Kling works best with single-scene prompts.`,
-    veo: `Additional for Veo: Full scene description: "Golden hour light at Mediterranean cafe terrace, woman in [product] sits at marble table, turns to camera with natural smile, bokeh background of warm string lights". Veo loves environmental detail.`,
-    sora: `Additional for Sora: Describe atmospheric physics: "wind gently moves hair and fabric, warm sunlight creates lens flare through cafe awning, coffee steam rises in foreground bokeh". Sora nails atmospheric scenes.`,
+    base: `Sen moda e-ticaret icin yasam tarzi sahnesi yonetmenisin.
+LIFESTYLE SCENE modu: Aspirasyonel gercek dunya ortami.
+
+ZORUNLU OGELER:
+- Guzel gercek dunya lokasyonu: kafe terasi, sahil yuruyusu, cati kati, bahce
+- Dogal altin saat veya sihirli saat isigi
+- Dogal, poze edilmemis his: gulme, baska tarafa bakma, mekanda hareket etme
+- Ortam baglami: kahve fincani, kitap, mimari, doga
+- Sinematik sag alan derinligi
+- HOOK: Ilk 0.5 saniyede aspirasyonel ortam kuruluyor, urun goruluyor
+- Duygusal baglanti: izleyici orada olmak istemeli
+- Son kare: aspirasyonel yasamdan bir kesit — mutlu, rahat, ozgur
+- Renk grading: sicak golden hour tonlari, yumusak kontrast`,
+    kling: `Kling icin: Tek lokasyonda tek net aksiyonla sahneyi basit tut. "Kafe terasinda manken, golden hour, sacini tutup gulumsuyor" gibi.`,
+    veo: `Veo icin: Tam sahne tarifi: "Akdeniz kafe terasinda altin saat isigi, mermer masada manken, dogal gulum semeyle kameraya donuyor, sicak dize isiklari bokeh arka plan".`,
+    sora: `Sora icin: Atmosferik fizik tarif et: "ruzgar kumasi ve saclari hafifce hareket ettiriyor, sicak gunes isigi tente arasındam lens flare yaratyor, on planda kahve buheri". Kisi tarifi YAPMA.`,
+    minimax: `MiniMax icin: "Kafe terasi, golden hour, manken dogal sekilde hareket ediyor" gibi ortam odakli prompt yaz.`,
   },
 
   'detail-zoom': {
-    base: `You are an elite Meta Andromeda video ad director for premium fashion detail content.
-Create a DETAIL ZOOM video prompt: macro close-up of fabric, stitching, details.
-Key elements:
-- Macro/close-up camera starting from product overview, zooming to detail
-- Extreme shallow depth of field (f/1.4 feel)
-- Texture emphasis: fabric weave, thread count, button detail, zipper
-- Slow, smooth dolly-in or rack focus transition
-- Directional side light to reveal texture dimensionality
-- First 0.5s: movement already happening, draws eye in
-- 2-4 seconds, vertical 9:16
-- Tactile quality: viewer can "feel" the material
-Output ONLY the prompt text, nothing else.`,
-    kling: `Additional for Kling: "Slow zoom into fabric detail, macro close-up, shallow depth of field, side lighting". Keep it focused on one detail area.`,
-    veo: `Additional for Veo: "Smooth dolly push from medium shot to extreme close-up of [detail], rack focus reveals texture depth, side light creates dimensional shadows across fabric weave". Veo handles focus transitions well.`,
-    sora: `Additional for Sora: "Camera pushes slowly into fabric surface, individual threads become visible, light rakes across texture creating micro-shadows". Sora handles scale transitions and material detail well.`,
+    base: `Sen moda e-ticaret icin urun detay videosu yonetmenisin.
+DETAIL ZOOM modu: Makro yakin cekim — kumas, dikiis, detay.
+
+ZORUNLU OGELER:
+- Makro/yakin cekim: urun genelinden detaya zoom
+- Asiri sag alan derinligi (f/1.4 hissi)
+- Doku vurgusu: kumas orgusu, iplik sayisi, dugme detayi, fermuar
+- Yavas, duizgun dolly-in veya rack focus gecisi
+- Yonlu yan isik doku boyutsalligini ortaya cikarir
+- HOOK: Ilk 0.5 saniyede hareket zaten baslamis, gozu iceri ceker
+- Dokunsal kalite: izleyici malzemeyi "hissedebilmeli"
+- Son kare: en etkileyici detayin makro gorunumu — doku, isiltii, iplik
+- Renk grading: notr, net, detay odakli — renkleri bozma`,
+    kling: `Kling icin: "Kumas detayina yavas zoom, makro yakin cekim, sag alan derinligi, yan isik". Tek detay alanina odaklan.`,
+    veo: `Veo icin: "Orta cekimden asiri yakin cekime duizgun dolly push, rack focus doku derinligini ortaya cikariyor, yan isik kumas orgusu uzerinde boyutsal golgeler yaratiyor".`,
+    sora: `Sora icin: "Kamera yavasca kumas yuzeyine ilerliyor, bireysel iplikler gorunur hale geliyor, isik doku uzerinde surerek mikro golgeler yaratiyor". Kisi tarifi YAPMA.`,
+    minimax: `MiniMax icin: "Kumas detayina yakin cekim, doku ve isik vurgusu" gibi detay odakli kisa prompt yaz.`,
   },
 
   'before-after-reveal': {
-    base: `You are an elite Meta Andromeda video ad director for fashion transformation content.
-Create a BEFORE-AFTER REVEAL video prompt: flat product transforms to styled/worn look.
-Key elements:
-- Opening: beautifully styled flat-lay on clean surface
-- Dramatic transition: unfold, lift, magic reveal, or morph
-- Final: product worn/styled with confidence
-- Wow factor in the transition moment
-- Clean, bright lighting throughout
-- First 0.5s: intriguing flat-lay composition
-- 3-5 seconds, vertical 9:16
-- Transformation creates curiosity and satisfaction
-Output ONLY the prompt text, nothing else.`,
-    kling: `Additional for Kling: "Product starts as flat-lay, hands lift and unfold it, transitions to being worn". Keep the transformation simple and physical.`,
-    veo: `Additional for Veo: "Overhead shot of styled flat-lay on white marble, camera slowly tilts as garment begins to lift and unfold, morphing seamlessly into worn product at eye level". Veo can handle creative transitions.`,
-    sora: `Additional for Sora: "Fabric defies gravity, rising from flat surface, unfolding and wrapping into worn position, each fold following natural drape physics". Sora excels at physics-defying but believable motion.`,
+    base: `Sen moda e-ticaret icin donusum videosu yonetmenisin.
+BEFORE-AFTER REVEAL modu: Duz urun giyilmis/stilize hale donusuyor.
+
+ZORUNLU OGELER:
+- Acilis: guzelce stilize edilmis flat-lay temiz yuzey uzerinde
+- Dramatik gecis: acilma, kalkma, sihirli reveal veya donusum
+- Final: urun giyilmis/stilize, ozguvenli durusum
+- Gecis aninda wow faktoru
+- Temiz, parlak aydinlatma boyunca
+- HOOK: Ilk 0.5 saniyede ilgi cekici flat-lay kompozisyonu
+- Donusum merak ve tatmin yaratir
+- Son kare: urunun en etkileyici giyilmis/stilize hali
+- Kumas fizigi: kalkarken, acilirken dogal fizik kurallarini takip eder`,
+    kling: `Kling icin: "Urun flat-lay olarak basliyor, eller alip aciyor, giyilmis hale geciyor". Donusumu basit ve fiziksel tut.`,
+    veo: `Veo icin: "Beyaz mermer uzerinde stilize flat-lay'in ustten cekimi, eller kadraja girip giysiyi kaldirirken kamera yavasca egilir, goz hizasında giyilmis urune sorunsuz gecis".`,
+    sora: `Sora icin: "Kumas yercekimine meydan okuyor, duz yuzeyden yukseliyor, aciliyor ve giyilmis pozisyona sariliyor, her kivrim dogal drapaj fizigini takip ediyor". Kisi tarifi YAPMA.`,
+    minimax: `MiniMax icin: "Flat-lay'den giyilmis hale sihirli gecis, reveal efekti" gibi donusum odakli prompt yaz.`,
   },
 }
 
 // ═══════════ Fashion-Specific Negative Prompts ═══════════
 const FASHION_NEGATIVE_PROMPTS: Record<string, string> = {
-  default: 'blur, distortion, low quality, watermark, text overlay, deformed hands, extra fingers, unnatural fabric movement, stiff cloth, distorted body proportions, ugly, disfigured, low resolution, grainy, oversaturated',
-  luxury: 'blur, distortion, low quality, watermark, text overlay, deformed hands, extra fingers, cheap fabric look, plastic texture, flat lighting, harsh shadows, amateur composition, oversaturated colors',
-  ugc: 'blur, distortion, low quality, watermark, text overlay, deformed hands, extra fingers, overly polished, too perfect, studio lighting, artificial pose',
-  minimal: 'blur, distortion, low quality, watermark, text overlay, deformed hands, extra fingers, cluttered background, busy composition, harsh colors, distracting elements',
+  default: 'blur, distortion, low quality, watermark, text overlay, deformed hands, extra fingers, unnatural fabric movement, stiff cloth, distorted body proportions, ugly, disfigured, low resolution, grainy, oversaturated, robotic movement, frozen pose',
+  luxury: 'blur, distortion, low quality, watermark, text overlay, deformed hands, extra fingers, cheap fabric look, plastic texture, flat lighting, harsh shadows, amateur composition, oversaturated colors, fast movement, shaky camera',
+  ugc: 'blur, distortion, low quality, watermark, text overlay, deformed hands, extra fingers, overly polished, too perfect, studio lighting, artificial pose, stiff movement, robotic',
+  minimal: 'blur, distortion, low quality, watermark, text overlay, deformed hands, extra fingers, cluttered background, busy composition, harsh colors, distracting elements, multiple subjects',
 }
 
 function getNegativePrompt(mode: string): string {
@@ -271,7 +311,6 @@ export const handler: Handler = async (event) => {
       if (!ANTHROPIC_KEY) throw new Error('ANTHROPIC_API_KEY eksik')
 
       const { imageUrl, imageUrls, videoMode, videoModel, productTitle, productDescription } = body
-      // Support single imageUrl or array imageUrls
       const allImageUrls: string[] = imageUrls || (imageUrl ? [imageUrl] : [])
       if (allImageUrls.length === 0) throw new Error('imageUrl veya imageUrls gerekli')
 
@@ -288,36 +327,27 @@ export const handler: Handler = async (event) => {
         systemPrompt += '\n\n' + modelExtra
       }
 
-      // Add Meta Andromeda compliance reminder
-      systemPrompt += `\n\nCRITICAL Meta Andromeda Requirements:
-- Vertical 9:16 format (mention this in the prompt)
-- 2-5 seconds duration
-- First 0.5 seconds must be visually arresting (thumb-stopping)
-- Product must be clearly visible and the hero of the shot
-- Motion must feel natural, not artificial or robotic
-- No text, logos, or overlays in the video itself
+      // Add prompt structure template
+      systemPrompt += '\n\n' + PROMPT_STRUCTURE
 
-LANGUAGE REQUIREMENT — CRITICAL:
-- The ENTIRE video prompt MUST be written in TURKISH (Turkce).
-- All descriptions, camera directions, scene descriptions — everything in Turkish.
-- If there is any speech, voiceover, or dialogue in the video, it MUST be in Turkish.
-- The target audience is Turkish women shopping online.
-- Example: Instead of "Woman walks confidently" write "Kadin ozguvenli bir sekilde yuruyor"
-- Write the prompt ENTIRELY in Turkish, do not mix English.`
+      // Add Meta Andromeda compliance
+      systemPrompt += `\n\nMeta Andromeda Gereksinimleri:
+- Dikey 9:16 format
+- 2-5 saniye sure
+- Ilk 0.5 saniye gorsel olarak carpici olmali (scroll durdurucu)
+- Urun acikca gorunmeli ve cekimin yildizi olmali
+- Hareket dogal olmali, yapay veya robotik DEGIL
+- Video icinde yazi, logo veya kaplama YOK
+- Konusma/seslendirme varsa TURKCE olmali`
 
       // For Sora: text-to-video mode — must avoid moderation triggers
       if (modelFamily === 'sora') {
-        systemPrompt += `\n\nIMPORTANT — SORA TEXT-TO-VIDEO MODE:
-Since this will be used in text-to-video mode (no image reference), your prompt MUST:
-- Focus ENTIRELY on the GARMENT/PRODUCT — describe its color, material, cut, silhouette, pattern in detail
-- Describe camera movements, lighting, and scene environment in detail
-- Use "model" or "manken" as a neutral term — do NOT describe the person's body, face, skin, or physical features AT ALL
-- Do NOT mention age, body type, skin tone, hair color, or any physical characteristics of any person
-- Keep focus on: the garment's fabric movement, texture, color, how light interacts with the material
-- Scene descriptions should be about the ENVIRONMENT (location, lighting, props) not people
-- If someone wears the garment, say only "manken" or "kisi" without any physical description
-- ALL of the above must be written in TURKISH.
-- CRITICAL: Sora has strict content moderation. Any detailed description of a person's appearance WILL be blocked. Keep it product-focused.`
+        systemPrompt += `\n\nSORA OZEL KURALLAR:
+- Text-to-video modu kullaniliyor, gorsel referansi YOK
+- Giysi/urunun rengini, kumasini, kesimini, desenini CОOK DETAYLI tarif et
+- "Manken" veya "kisi" kelimesini kullan — fiziksel ozellik BELIRTME (yas, vucud, ten, sac YAZMA)
+- Sahne ve ortam detaylarini vurgula, kisi tarifinden kacin
+- Sora'nin moderasyonu siki — kisi gorunum tarifi ENGELLENECEK`
       }
 
       // Build image blocks for all selected images
@@ -334,7 +364,7 @@ Since this will be used in text-to-video mode (no image reference), your prompt 
       }
 
       const multiImageNote = allImageUrls.length > 1
-        ? `\n\n${allImageUrls.length} gorsel gonderildi. Tum gorselleri analiz ederek urunun rengini, kumasini, kesimini, detaylarini tam olarak anla. Tutarlilik icin tum acilardaki detaylari prompt'a yansit.`
+        ? `\n\n${allImageUrls.length} GORSEL GONDERILDI. Tum gorselleri analiz ederek urunun her acisindan rengini, kumasini, kesimini, ozel detaylarini tam olarak anla. Prompt'ta tum bu detaylari kullanarak tutarli bir video tarifi olustur.`
         : ''
 
       const userContent = `Urun: ${productTitle || 'Kadin giyim urun'}
@@ -342,16 +372,17 @@ ${productDescription ? `Aciklama: ${productDescription}` : ''}
 Hedef: Kadin giyim e-ticaret, Meta/Instagram Reels reklam
 Format: Dikey 9:16, 2-5 saniye${multiImageNote}
 
-Bu urun gorsellerini dikkatlice analiz et. Dikkat edilmesi gerekenler:
-- Giysi turu, rengi, kumasi/dokusu
-- Kesim detaylari, desen, suslemeler
-- One cikarilmasi gereken en iyi aci ve ozellikler
+Bu urun gorsellerini dikkatlice analiz et:
+1. GIYSI: Turu, rengi (spesifik ton), kumasi/dokusu, deseni
+2. DETAYLAR: Kesim, dugmeler, fermuarlar, suslemeler, islemeler
+3. KUMAS DAVRANISI: Isikla etkilesimi, dokusu, nasil duser/hareket eder
+4. EN IYI ACI: Urunun en carpici ozelligi hangisi?
 
-Tek bir production-ready video prompt'u uret. Icerecekler: kamera hareketi turu, aydinlatma kurulumu, hareket koreografisi, zamanlama ve ortam. SADECE prompt metnini yaz, baska bir sey yazma. TURKCE yaz.`
+Simdi yukardaki PROMPT FORMATI'na uygun, 80-150 kelime arasi, tek paragraf halinde, tamamen TURKCE bir video prompt'u yaz. SADECE prompt metnini yaz.`
 
       const payload = JSON.stringify({
         model: 'claude-opus-4-20250514',
-        max_tokens: 1000,
+        max_tokens: 1200,
         system: systemPrompt,
         messages: [{
           role: 'user',
@@ -450,8 +481,6 @@ Tek bir production-ready video prompt'u uret. Icerecekler: kamera hareketi turu,
       if (!FAL_KEY) throw new Error('FAL_KEY eksik')
       if (!body.path) throw new Error('path gerekli')
 
-      console.log(`[video] fal_video_status GET: ${body.path}`)
-
       const result = await httpsRequest({
         hostname: 'queue.fal.run',
         path: body.path,
@@ -478,7 +507,6 @@ Tek bir production-ready video prompt'u uret. Icerecekler: kamera hareketi turu,
 
       const { prompt, imageUrl, veoModel, aspectRatio } = body
 
-      // Fetch image and convert to base64
       let imageObj: any = null
       if (imageUrl) {
         try {
@@ -505,11 +533,9 @@ Tek bir production-ready video prompt'u uret. Icerecekler: kamera hareketi turu,
       }
 
       const model = veoModel || 'veo-2.0-generate-001'
-
       const instance: any = { prompt: prompt || '' }
       if (imageObj) instance.image = imageObj
 
-      // Add generation config with aspect ratio
       const veoRequestBody: any = { instances: [instance] }
       if (aspectRatio) {
         veoRequestBody.parameters = { aspectRatio: aspectRatio }
@@ -518,7 +544,7 @@ Tek bir production-ready video prompt'u uret. Icerecekler: kamera hareketi turu,
       const veoPayload = JSON.stringify(veoRequestBody)
       const veoPath = `/v1beta/models/${model}:predictLongRunning?key=${GEMINI_KEY}`
 
-      console.log(`[video] Veo predictLongRunning, model=${model}, aspectRatio=${aspectRatio || 'default'}, prompt length=${prompt?.length || 0}`)
+      console.log(`[video] Veo predictLongRunning, model=${model}, aspectRatio=${aspectRatio || 'default'}`)
 
       const result = await httpsRequest({
         hostname: 'generativelanguage.googleapis.com',
@@ -600,16 +626,13 @@ Tek bir production-ready video prompt'u uret. Icerecekler: kamera hareketi turu,
       }
     }
 
-    // ═══════════ VEO PROXY — Securely stream video without exposing API key ═══════════
+    // ═══════════ VEO PROXY ═══════════
     if (action === 'veo_proxy') {
       if (!GEMINI_KEY) throw new Error('GEMINI_API_KEY eksik')
       const { videoUri } = body
       if (!videoUri) throw new Error('videoUri gerekli')
 
-      // Add API key server-side and fetch the video
       const secureUri = videoUri.includes('?') ? `${videoUri}&key=${GEMINI_KEY}` : `${videoUri}?key=${GEMINI_KEY}`
-
-      // Parse the URL to make the request
       const url = new URL(secureUri)
 
       const videoData = await new Promise<{ status: number; buffer: Buffer; contentType: string }>((resolve, reject) => {
@@ -618,9 +641,7 @@ Tek bir production-ready video prompt'u uret. Icerecekler: kamera hareketi turu,
           path: url.pathname + url.search,
           method: 'GET',
         }, (res) => {
-          // Handle redirect
           if (res.statusCode && res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
-            // Follow redirect
             const redirectUrl = new URL(res.headers.location as string)
             const req2 = https.request({
               hostname: redirectUrl.hostname,
@@ -675,7 +696,6 @@ Tek bir production-ready video prompt'u uret. Icerecekler: kamera hareketi turu,
 
       const { prompt, imageUrl, soraModel, size, seconds } = body
 
-      // Build Sora payload with image support
       const soraPayload: any = {
         model: soraModel || 'sora-2',
         prompt: prompt || '',
@@ -683,11 +703,8 @@ Tek bir production-ready video prompt'u uret. Icerecekler: kamera hareketi turu,
       if (size) soraPayload.size = size
       if (seconds) soraPayload.seconds = String(seconds)
 
-      // Sora input_reference rejects images with human faces (OpenAI policy).
-      // Fashion e-commerce images almost always contain people, so we use
-      // text-to-video mode by default. The Claude-generated prompt already
-      // describes the product in detail based on the image analysis.
-      // Only attach image if explicitly requested AND image has no humans.
+      // Sora input_reference rejects images with human faces.
+      // Fashion images always contain people, so text-to-video by default.
       if (imageUrl && body.forceImageRef) {
         try {
           let dataUrl: string | null = null
@@ -722,8 +739,6 @@ Tek bir production-ready video prompt'u uret. Icerecekler: kamera hareketi turu,
           'Content-Length': Buffer.byteLength(payload),
         },
       }, payload)
-
-      console.log(`[video] sora_submit response: ${result.status}`)
 
       if (result.status !== 200 && result.status !== 201 && result.status !== 202) {
         console.error(`[video] Sora error: ${result.body.substring(0, 300)}`)
@@ -776,7 +791,7 @@ Tek bir production-ready video prompt'u uret. Icerecekler: kamera hareketi turu,
           videoUrl = soraData.output[0]?.url || soraData.output[0]?.video?.url || null
         }
 
-        // Try /content endpoint to get redirect URL (fast, no binary download)
+        // Try /content endpoint for redirect URL
         if (!videoUrl) {
           try {
             console.log(`[video] Sora: trying /content for redirect URL`)
@@ -870,11 +885,10 @@ Tek bir production-ready video prompt'u uret. Icerecekler: kamera hareketi turu,
         }
       }
 
-      // If we got a non-200 status, return it as a retriable error with details
+      // Not ready yet or error
       const bodyPreview = videoData.buffer.toString('utf-8').substring(0, 300)
       console.log(`[video] sora_download failed: status=${videoData.status}, size=${videoData.buffer.length}, body=${bodyPreview}`)
 
-      // 202/404 means video not ready yet — return success:false so frontend can retry
       if (videoData.status === 202 || videoData.status === 404) {
         return {
           statusCode: 200,
@@ -886,12 +900,11 @@ Tek bir production-ready video prompt'u uret. Icerecekler: kamera hareketi turu,
       throw new Error(`Sora video indirilemedi (status: ${videoData.status}, body: ${bodyPreview})`)
     }
 
-    // ═══════════ DOWNLOAD PROXY — Secure cross-origin video download ═══════════
+    // ═══════════ DOWNLOAD PROXY ═══════════
     if (action === 'download_proxy') {
       const { videoUrl } = body
       if (!videoUrl) throw new Error('videoUrl gerekli')
 
-      // Don't proxy data: URLs
       if (videoUrl.startsWith('data:')) {
         return {
           statusCode: 200,
@@ -965,7 +978,6 @@ Tek bir production-ready video prompt'u uret. Icerecekler: kamera hareketi turu,
   }
 }
 
-// Helper: determine model family for prompt specialization
 function getModelFamily(videoModel: string): string {
   if (videoModel.includes('kling')) return 'kling'
   if (videoModel.includes('veo')) return 'veo'
