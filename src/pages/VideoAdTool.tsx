@@ -353,17 +353,27 @@ export default function VideoAdTool({ addToast }: Props) {
 
           if (pollData.done) {
             let videoUrl = pollData.videoUrl
+
+            // Always try sora_download — it handles binary + redirects properly
             if (!videoUrl) {
               setStatusText('Sora video indiriliyor...')
-              const dlRes = await fetch('/api/video-generate', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ action: 'sora_download', videoId }),
-              })
-              const dlData = await safeJson(dlRes)
-              if (dlData.success && dlData.videoUrl) videoUrl = dlData.videoUrl
+              for (let dlAttempt = 0; dlAttempt < 3; dlAttempt++) {
+                try {
+                  const dlRes = await fetch('/api/video-generate', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ action: 'sora_download', videoId }),
+                  })
+                  const dlData = await safeJson(dlRes)
+                  if (dlData.success && dlData.videoUrl) { videoUrl = dlData.videoUrl; break }
+                } catch {
+                  // Retry after short delay
+                  await new Promise(r => setTimeout(r, 3000))
+                }
+              }
             }
-            if (!videoUrl) throw new Error('Sora video URL bulunamadi')
+
+            if (!videoUrl) throw new Error('Sora video URL bulunamadi — video henuz hazir olmayabilir, birkas dakika sonra tekrar deneyin')
             addCost(soraModelId, 'Sora Video')
             finishJob(videoUrl)
             return

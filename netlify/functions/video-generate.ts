@@ -293,7 +293,8 @@ export const handler: Handler = async (event) => {
 - First 0.5 seconds must be visually arresting (thumb-stopping)
 - Product must be clearly visible and the hero of the shot
 - Motion must feel natural, not artificial or robotic
-- No text, logos, or overlays in the video itself`
+- No text, logos, or overlays in the video itself
+- IMPORTANT: If the video includes any speech, voiceover, or dialogue, it MUST be in Turkish (Turkce). The target audience is Turkish women.`
 
       // For Sora: text-to-video mode needs extra detail since no image reference is sent
       if (modelFamily === 'sora') {
@@ -742,6 +743,8 @@ Generate a single, production-ready video prompt. Include specific: camera movem
       console.log(`[video] Sora poll status=${soraData.status}, keys=${Object.keys(soraData).join(',')}`)
 
       if (soraData.status === 'completed') {
+        console.log(`[video] Sora completed, full response: ${JSON.stringify(soraData).substring(0, 500)}`)
+
         let videoUrl = soraData.output?.url
           || soraData.url
           || soraData.video?.url
@@ -754,31 +757,9 @@ Generate a single, production-ready video prompt. Include specific: camera movem
           videoUrl = soraData.output[0]?.url || soraData.output[0]?.video?.url || null
         }
 
-        // Try content download endpoint
-        if (!videoUrl) {
-          try {
-            const contentResult = await httpsRequest({
-              hostname: 'api.openai.com',
-              path: `/v1/videos/${videoId}/content`,
-              method: 'GET',
-              headers: { 'Authorization': `Bearer ${OPENAI_KEY}` },
-            })
-
-            if (contentResult.headers?.location) {
-              videoUrl = contentResult.headers.location
-            } else if (contentResult.status === 200) {
-              try {
-                const contentData = JSON.parse(contentResult.body)
-                videoUrl = contentData.url || contentData.download_url || null
-              } catch {
-                console.log(`[video] Sora content non-JSON, body length=${contentResult.body.length}`)
-              }
-            }
-          } catch (e) {
-            console.warn(`[video] Sora content fetch failed: ${(e as Error).message}`)
-          }
-        }
-
+        // Return done=true with whatever URL we have (may be null).
+        // Frontend will call sora_download if videoUrl is null.
+        // sora_download handles binary properly (httpsRequest corrupts binary).
         return {
           statusCode: 200,
           headers: { 'Content-Type': 'application/json' },
