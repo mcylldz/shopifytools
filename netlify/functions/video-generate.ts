@@ -305,16 +305,19 @@ LANGUAGE REQUIREMENT — CRITICAL:
 - Example: Instead of "Woman walks confidently" write "Kadin ozguvenli bir sekilde yuruyor"
 - Write the prompt ENTIRELY in Turkish, do not mix English.`
 
-      // For Sora: text-to-video mode needs extra detail since no image reference is sent
+      // For Sora: text-to-video mode — must avoid moderation triggers
       if (modelFamily === 'sora') {
         systemPrompt += `\n\nIMPORTANT — SORA TEXT-TO-VIDEO MODE:
-Since this will be used in text-to-video mode (no image reference), your prompt MUST include:
-- Extremely detailed visual description of the garment (exact color, material, cut, silhouette, pattern)
-- Specific model appearance (hair, skin tone, body type) that fits the fashion context
-- Complete scene composition — do NOT assume the model can see the product image
-- Every visual detail must be in the text prompt itself
-- Describe the garment as if the reader has never seen it
-- ALL of the above must be written in TURKISH.`
+Since this will be used in text-to-video mode (no image reference), your prompt MUST:
+- Focus ENTIRELY on the GARMENT/PRODUCT — describe its color, material, cut, silhouette, pattern in detail
+- Describe camera movements, lighting, and scene environment in detail
+- Use "model" or "manken" as a neutral term — do NOT describe the person's body, face, skin, or physical features AT ALL
+- Do NOT mention age, body type, skin tone, hair color, or any physical characteristics of any person
+- Keep focus on: the garment's fabric movement, texture, color, how light interacts with the material
+- Scene descriptions should be about the ENVIRONMENT (location, lighting, props) not people
+- If someone wears the garment, say only "manken" or "kisi" without any physical description
+- ALL of the above must be written in TURKISH.
+- CRITICAL: Sora has strict content moderation. Any detailed description of a person's appearance WILL be blocked. Keep it product-focused.`
       }
 
       // Build image blocks for all selected images
