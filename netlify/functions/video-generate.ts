@@ -773,9 +773,31 @@ Tek bir production-ready video prompt'u uret. Icerecekler: kamera hareketi turu,
           videoUrl = soraData.output[0]?.url || soraData.output[0]?.video?.url || null
         }
 
-        // Return done=true with whatever URL we have (may be null).
-        // Frontend will call sora_download if videoUrl is null.
-        // sora_download handles binary properly (httpsRequest corrupts binary).
+        // Try /content endpoint to get redirect URL (fast, no binary download)
+        if (!videoUrl) {
+          try {
+            console.log(`[video] Sora: trying /content for redirect URL`)
+            const contentResult = await httpsRequest({
+              hostname: 'api.openai.com',
+              path: `/v1/videos/${videoId}/content`,
+              method: 'GET',
+              headers: { 'Authorization': `Bearer ${OPENAI_KEY}` },
+            })
+            console.log(`[video] Sora /content status=${contentResult.status}, hasLocation=${!!contentResult.headers?.location}`)
+
+            if (contentResult.headers?.location) {
+              videoUrl = contentResult.headers.location
+            } else if (contentResult.status === 200 && contentResult.body) {
+              try {
+                const cd = JSON.parse(contentResult.body)
+                videoUrl = cd.url || cd.download_url || null
+              } catch { /* not JSON */ }
+            }
+          } catch (e) {
+            console.warn(`[video] Sora /content failed: ${(e as Error).message}`)
+          }
+        }
+
         return {
           statusCode: 200,
           headers: { 'Content-Type': 'application/json' },
