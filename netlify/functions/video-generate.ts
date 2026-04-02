@@ -270,8 +270,10 @@ export const handler: Handler = async (event) => {
     if (action === 'generate_prompt') {
       if (!ANTHROPIC_KEY) throw new Error('ANTHROPIC_API_KEY eksik')
 
-      const { imageUrl, videoMode, videoModel, productTitle, productDescription } = body
-      if (!imageUrl) throw new Error('imageUrl gerekli')
+      const { imageUrl, imageUrls, videoMode, videoModel, productTitle, productDescription } = body
+      // Support single imageUrl or array imageUrls
+      const allImageUrls: string[] = imageUrls || (imageUrl ? [imageUrl] : [])
+      if (allImageUrls.length === 0) throw new Error('imageUrl veya imageUrls gerekli')
 
       const modeConfig = VIDEO_MODE_PROMPTS[videoMode]
       if (!modeConfig) throw new Error(`Gecersiz video modu: ${videoMode}`)
@@ -294,7 +296,14 @@ export const handler: Handler = async (event) => {
 - Product must be clearly visible and the hero of the shot
 - Motion must feel natural, not artificial or robotic
 - No text, logos, or overlays in the video itself
-- IMPORTANT: If the video includes any speech, voiceover, or dialogue, it MUST be in Turkish (Turkce). The target audience is Turkish women.`
+
+LANGUAGE REQUIREMENT — CRITICAL:
+- The ENTIRE video prompt MUST be written in TURKISH (Turkce).
+- All descriptions, camera directions, scene descriptions — everything in Turkish.
+- If there is any speech, voiceover, or dialogue in the video, it MUST be in Turkish.
+- The target audience is Turkish women shopping online.
+- Example: Instead of "Woman walks confidently" write "Kadin ozguvenli bir sekilde yuruyor"
+- Write the prompt ENTIRELY in Turkish, do not mix English.`
 
       // For Sora: text-to-video mode needs extra detail since no image reference is sent
       if (modelFamily === 'sora') {
@@ -304,31 +313,38 @@ Since this will be used in text-to-video mode (no image reference), your prompt 
 - Specific model appearance (hair, skin tone, body type) that fits the fashion context
 - Complete scene composition — do NOT assume the model can see the product image
 - Every visual detail must be in the text prompt itself
-- Describe the garment as if the reader has never seen it`
-      }
+- Describe the garment as if the reader has never seen it
+- ALL of the above must be written in TURKISH.`
+      }`
 
-      let imageBlock: any
-      if (imageUrl.startsWith('data:')) {
-        const match = imageUrl.match(/^data:(image\/\w+);base64,(.+)$/)
-        if (match) {
-          imageBlock = { type: 'image', source: { type: 'base64', media_type: match[1], data: match[2] } }
+      // Build image blocks for all selected images
+      const imageBlocks: any[] = []
+      for (const imgUrl of allImageUrls) {
+        if (imgUrl.startsWith('data:')) {
+          const match = imgUrl.match(/^data:(image\/\w+);base64,(.+)$/)
+          if (match) {
+            imageBlocks.push({ type: 'image', source: { type: 'base64', media_type: match[1], data: match[2] } })
+          }
+        } else {
+          imageBlocks.push({ type: 'image', source: { type: 'url', url: imgUrl } })
         }
       }
-      if (!imageBlock) {
-        imageBlock = { type: 'image', source: { type: 'url', url: imageUrl } }
-      }
 
-      const userContent = `Product: ${productTitle || 'Women\'s fashion garment'}
-${productDescription ? `Description: ${productDescription}` : ''}
-Target: Women's fashion e-commerce, Meta/Instagram Reels ad placement
-Format: Vertical 9:16, 2-5 seconds
+      const multiImageNote = allImageUrls.length > 1
+        ? `\n\n${allImageUrls.length} gorsel gonderildi. Tum gorselleri analiz ederek urunun rengini, kumasini, kesimini, detaylarini tam olarak anla. Tutarlilik icin tum acilardaki detaylari prompt'a yansit.`
+        : ''
 
-Analyze this product image carefully. Note the:
-- Garment type, color, material/texture
-- Key design details (cut, pattern, embellishments)
-- Best angle and features to highlight
+      const userContent = `Urun: ${productTitle || 'Kadin giyim urun'}
+${productDescription ? `Aciklama: ${productDescription}` : ''}
+Hedef: Kadin giyim e-ticaret, Meta/Instagram Reels reklam
+Format: Dikey 9:16, 2-5 saniye${multiImageNote}
 
-Generate a single, production-ready video prompt. Include specific: camera movement type, lighting setup, motion choreography, timing, and environment. Output ONLY the prompt text.`
+Bu urun gorsellerini dikkatlice analiz et. Dikkat edilmesi gerekenler:
+- Giysi turu, rengi, kumasi/dokusu
+- Kesim detaylari, desen, suslemeler
+- One cikarilmasi gereken en iyi aci ve ozellikler
+
+Tek bir production-ready video prompt'u uret. Icerecekler: kamera hareketi turu, aydinlatma kurulumu, hareket koreografisi, zamanlama ve ortam. SADECE prompt metnini yaz, baska bir sey yazma. TURKCE yaz.`
 
       const payload = JSON.stringify({
         model: 'claude-opus-4-20250514',
@@ -338,7 +354,7 @@ Generate a single, production-ready video prompt. Include specific: camera movem
           role: 'user',
           content: [
             { type: 'text', text: userContent },
-            imageBlock,
+            ...imageBlocks,
           ],
         }],
       })
@@ -829,8 +845,20 @@ Generate a single, production-ready video prompt. Include specific: camera movem
         }
       }
 
-      const bodyPreview = videoData.buffer.toString('utf-8').substring(0, 200)
-      throw new Error(`Sora video indirilemedi (status: ${videoData.status}, size: ${videoData.buffer.length}, body: ${bodyPreview})`)
+      // If we got a non-200 status, return it as a retriable error with details
+      const bodyPreview = videoData.buffer.toString('utf-8').substring(0, 300)
+      console.log(`[video] sora_download failed: status=${videoData.status}, size=${videoData.buffer.length}, body=${bodyPreview}`)
+
+      // 202/404 means video not ready yet — return success:false so frontend can retry
+      if (videoData.status === 202 || videoData.status === 404) {
+        return {
+          statusCode: 200,
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ success: false, retriable: true, error: `Video henuz hazir degil (${videoData.status})` }),
+        }
+      }
+
+      throw new Error(`Sora video indirilemedi (status: ${videoData.status}, body: ${bodyPreview})`)
     }
 
     // ═══════════ DOWNLOAD PROXY — Secure cross-origin video download ═══════════

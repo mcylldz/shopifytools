@@ -102,6 +102,7 @@ export default function VideoAdTool({ addToast }: Props) {
   const [productTitle, setProductTitle] = useState('')
   const [productDescription, setProductDescription] = useState('')
   const [selectedImage, setSelectedImage] = useState(0)
+  const [selectedImages, setSelectedImages] = useState<number[]>([0]) // multi-select for consistency
   const [fetchingImages, setFetchingImages] = useState(false)
 
   // ─ Video Mode
@@ -151,6 +152,7 @@ export default function VideoAdTool({ addToast }: Props) {
       setProductTitle(data.product.title || '')
       setProductDescription(data.product.description?.replace(/<[^>]*>/g, '').substring(0, 200) || '')
       setSelectedImage(0)
+      setSelectedImages([0])
       addToast({ type: 'success', message: `${imgs.length} gorsel cekildi` })
       if (imgs.length > 0) goStep(2) // auto-advance
     } catch (err: any) {
@@ -167,12 +169,15 @@ export default function VideoAdTool({ addToast }: Props) {
     }
     setGeneratingPrompt(true)
     try {
+      // Send all selected images for consistency analysis
+      const imageUrls = selectedImages.map(idx => productImages[idx]).filter(Boolean)
       const res = await fetch('/api/video-generate', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           action: 'generate_prompt',
-          imageUrl: productImages[selectedImage],
+          imageUrl: productImages[selectedImage], // primary
+          imageUrls, // all selected
           videoMode,
           videoModel,
           productTitle,
@@ -354,10 +359,17 @@ export default function VideoAdTool({ addToast }: Props) {
           if (pollData.done) {
             let videoUrl = pollData.videoUrl
 
-            // Always try sora_download — it handles binary + redirects properly
+            // Download video via sora_download (handles binary + redirects)
+            // Retry up to 6 times with increasing delay — video may not be instantly available
             if (!videoUrl) {
               setStatusText('Sora video indiriliyor...')
-              for (let dlAttempt = 0; dlAttempt < 3; dlAttempt++) {
+              for (let dlAttempt = 0; dlAttempt < 6; dlAttempt++) {
+                if (cancelRef.current) return
+                const waitSec = (dlAttempt + 1) * 5 // 5s, 10s, 15s, 20s, 25s, 30s
+                if (dlAttempt > 0) {
+                  setStatusText(`Sora video indiriliyor... (deneme ${dlAttempt + 1}/6, ${waitSec}s bekleniyor)`)
+                  await new Promise(r => setTimeout(r, waitSec * 1000))
+                }
                 try {
                   const dlRes = await fetch('/api/video-generate', {
                     method: 'POST',
@@ -366,14 +378,15 @@ export default function VideoAdTool({ addToast }: Props) {
                   })
                   const dlData = await safeJson(dlRes)
                   if (dlData.success && dlData.videoUrl) { videoUrl = dlData.videoUrl; break }
-                } catch {
-                  // Retry after short delay
-                  await new Promise(r => setTimeout(r, 3000))
+                  if (dlData.retriable) continue // not ready yet, retry
+                  if (!dlData.success && !dlData.retriable) throw new Error(dlData.error || 'Download basarisiz')
+                } catch (dlErr: any) {
+                  if (dlAttempt === 5) throw dlErr
                 }
               }
             }
 
-            if (!videoUrl) throw new Error('Sora video URL bulunamadi — video henuz hazir olmayabilir, birkas dakika sonra tekrar deneyin')
+            if (!videoUrl) throw new Error('Sora video indirilemedi — 6 deneme yapildi')
             addCost(soraModelId, 'Sora Video')
             finishJob(videoUrl)
             return
@@ -582,32 +595,60 @@ export default function VideoAdTool({ addToast }: Props) {
 
             {productImages.length > 0 && (
               <>
+                <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 8 }}>
+                  Ana gorsel icin tiklayin. Tutarlilik icin birden fazla gorsel secmek isterseniz Ctrl/Cmd+tiklama yapin.
+                  Secili: <strong style={{ color: 'var(--accent)' }}>{selectedImages.length} gorsel</strong>
+                  {selectedImages.length > 1 && ' (Claude tum gorselleri analiz edecek)'}
+                </div>
                 <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(100px, 1fr))', gap: 10, marginBottom: 14 }}>
-                  {productImages.map((img, idx) => (
-                    <div
-                      key={idx}
-                      onClick={() => setSelectedImage(idx)}
-                      style={{
-                        border: selectedImage === idx ? '3px solid var(--accent)' : '2px solid var(--border)',
-                        borderRadius: 10,
-                        overflow: 'hidden',
-                        cursor: 'pointer',
-                        opacity: selectedImage === idx ? 1 : 0.5,
-                        transition: 'all .2s',
-                        position: 'relative',
-                      }}
-                    >
-                      <img src={img} alt="" style={{ width: '100%', height: 130, objectFit: 'cover' }} />
-                      {selectedImage === idx && (
-                        <div style={{
-                          position: 'absolute', top: 6, right: 6,
-                          background: 'var(--accent)', color: '#fff', borderRadius: '50%',
-                          width: 22, height: 22, display: 'flex', alignItems: 'center', justifyContent: 'center',
-                          fontSize: 12, fontWeight: 700,
-                        }}>✓</div>
-                      )}
-                    </div>
-                  ))}
+                  {productImages.map((img, idx) => {
+                    const isSelected = selectedImages.includes(idx)
+                    const isPrimary = selectedImage === idx
+                    return (
+                      <div
+                        key={idx}
+                        onClick={(e) => {
+                          if (e.ctrlKey || e.metaKey) {
+                            // Multi-select toggle
+                            setSelectedImages(prev =>
+                              prev.includes(idx) ? (prev.length > 1 ? prev.filter(i => i !== idx) : prev) : [...prev, idx]
+                            )
+                          } else {
+                            // Single select — set as primary + reset multi
+                            setSelectedImage(idx)
+                            setSelectedImages([idx])
+                          }
+                        }}
+                        style={{
+                          border: isPrimary ? '3px solid var(--accent)' : isSelected ? '2px solid var(--success)' : '2px solid var(--border)',
+                          borderRadius: 10,
+                          overflow: 'hidden',
+                          cursor: 'pointer',
+                          opacity: isSelected ? 1 : 0.4,
+                          transition: 'all .2s',
+                          position: 'relative',
+                        }}
+                      >
+                        <img src={img} alt="" style={{ width: '100%', height: 130, objectFit: 'cover' }} />
+                        {isPrimary && (
+                          <div style={{
+                            position: 'absolute', top: 6, right: 6,
+                            background: 'var(--accent)', color: '#fff', borderRadius: '50%',
+                            width: 22, height: 22, display: 'flex', alignItems: 'center', justifyContent: 'center',
+                            fontSize: 10, fontWeight: 800,
+                          }}>1</div>
+                        )}
+                        {isSelected && !isPrimary && (
+                          <div style={{
+                            position: 'absolute', top: 6, right: 6,
+                            background: 'var(--success)', color: '#fff', borderRadius: '50%',
+                            width: 22, height: 22, display: 'flex', alignItems: 'center', justifyContent: 'center',
+                            fontSize: 10, fontWeight: 800,
+                          }}>+</div>
+                        )}
+                      </div>
+                    )
+                  })}
                 </div>
                 <button className="btn btn-primary" onClick={() => goStep(2)} style={{ fontSize: 13, padding: '10px 28px' }}>
                   Devam →
