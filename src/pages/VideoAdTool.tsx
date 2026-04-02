@@ -68,35 +68,6 @@ async function safeJson(res: Response): Promise<any> {
   try { return JSON.parse(text) } catch { throw new Error(`Gecersiz yanit: ${text.substring(0, 200)}`) }
 }
 
-// Resize image to match Sora's expected input dimensions
-async function resizeImageForSora(imageUrl: string, targetSize: string): Promise<string> {
-  const [w, h] = targetSize.split('x').map(Number)
-  if (!w || !h) return imageUrl
-
-  return new Promise((resolve) => {
-    const img = new Image()
-    img.crossOrigin = 'anonymous'
-    img.onload = () => {
-      const canvas = document.createElement('canvas')
-      canvas.width = w
-      canvas.height = h
-      const ctx = canvas.getContext('2d')!
-
-      // Cover-fit: fill the canvas maintaining aspect ratio
-      const scale = Math.max(w / img.width, h / img.height)
-      const sw = w / scale
-      const sh = h / scale
-      const sx = (img.width - sw) / 2
-      const sy = (img.height - sh) / 2
-
-      ctx.drawImage(img, sx, sy, sw, sh, 0, 0, w, h)
-      resolve(canvas.toDataURL('image/jpeg', 0.92))
-    }
-    img.onerror = () => resolve(imageUrl) // fallback to original
-    img.src = imageUrl
-  })
-}
-
 // ═══════════ History (localStorage) ═══════════
 interface VideoHistoryItem {
   id: string
