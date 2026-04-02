@@ -650,7 +650,7 @@ Generate a single, production-ready video prompt. Include specific: camera movem
         prompt: prompt || '',
       }
       if (size) soraPayload.size = size
-      if (seconds) soraPayload.seconds = parseInt(String(seconds), 10)
+      if (seconds) soraPayload.seconds = String(seconds)
 
       // Add image reference for image-to-video (Sora uses input_reference with image_url)
       if (imageUrl) {

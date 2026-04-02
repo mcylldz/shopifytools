@@ -147,7 +147,7 @@ export default function VideoAdTool({ addToast }: Props) {
   const [klingDuration, setKlingDuration] = useState('5')
   const [klingCfgScale, setKlingCfgScale] = useState('0.5')
   const [minimaxPromptOptimizer, setMinimaxPromptOptimizer] = useState(true)
-  const [soraSeconds, setSoraSeconds] = useState('5')
+  const [soraSeconds, setSoraSeconds] = useState('4')
   const [soraSize, setSoraSize] = useState('720x1280')
 
   // ─ Job Status
@@ -362,7 +362,7 @@ export default function VideoAdTool({ addToast }: Props) {
             imageUrl: resizedImage,
             soraModel: soraModelId,
             size: soraSize,
-            seconds: parseInt(soraSeconds),
+            seconds: soraSeconds,
           }),
         })
         const soraData = await safeJson(soraRes)
@@ -936,10 +936,9 @@ export default function VideoAdTool({ addToast }: Props) {
                 <div className="form-group">
                   <label className="form-label" style={{ fontSize: 10 }}>Sure (sn)</label>
                   <select className="form-input" value={soraSeconds} onChange={e => setSoraSeconds(e.target.value)} style={{ fontSize: 12, padding: '6px 8px' }}>
-                    <option value="5">5 saniye</option>
-                    <option value="10">10 saniye</option>
-                    <option value="15">15 saniye</option>
-                    <option value="20">20 saniye</option>
+                    <option value="4">4 saniye</option>
+                    <option value="8">8 saniye</option>
+                    <option value="12">12 saniye</option>
                   </select>
                 </div>
                 <div className="form-group">
