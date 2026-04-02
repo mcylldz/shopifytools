@@ -652,32 +652,24 @@ Generate a single, production-ready video prompt. Include specific: camera movem
       if (size) soraPayload.size = size
       if (seconds) soraPayload.seconds = parseInt(String(seconds), 10)
 
-      // Add image input for image-to-video
+      // Add image reference for image-to-video (Sora uses input_reference with image_url)
       if (imageUrl) {
         try {
-          let imageBase64: string | null = null
-          let mimeType = 'image/jpeg'
+          let dataUrl: string | null = null
 
           if (imageUrl.startsWith('data:')) {
-            const match = imageUrl.match(/^data:(image\/\w+);base64,(.+)$/)
-            if (match) {
-              mimeType = match[1]
-              imageBase64 = match[2]
-            }
+            dataUrl = imageUrl
           } else {
             const imgRes = await fetch(imageUrl)
             if (imgRes.ok) {
               const buffer = await imgRes.arrayBuffer()
-              mimeType = imgRes.headers.get('content-type') || 'image/jpeg'
-              imageBase64 = Buffer.from(buffer).toString('base64')
+              const mimeType = imgRes.headers.get('content-type') || 'image/jpeg'
+              dataUrl = `data:${mimeType};base64,${Buffer.from(buffer).toString('base64')}`
             }
           }
 
-          if (imageBase64) {
-            soraPayload.input = [{
-              type: 'image_url',
-              image_url: { url: `data:${mimeType};base64,${imageBase64}` },
-            }]
+          if (dataUrl) {
+            soraPayload.input_reference = { image_url: dataUrl }
           }
         } catch (e) {
           console.warn(`[video] Sora image input failed: ${(e as Error).message}`)
@@ -685,7 +677,7 @@ Generate a single, production-ready video prompt. Include specific: camera movem
       }
 
       const payload = JSON.stringify(soraPayload)
-      console.log(`[video] sora_submit model=${soraModel || 'sora-2'}, hasImage=${!!soraPayload.input}, size=${size}, seconds=${seconds}`)
+      console.log(`[video] sora_submit model=${soraModel || 'sora-2'}, hasImage=${!!soraPayload.input_reference}, size=${size}, seconds=${seconds}`)
 
       const result = await httpsRequest({
         hostname: 'api.openai.com',
