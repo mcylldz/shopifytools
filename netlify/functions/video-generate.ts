@@ -295,6 +295,17 @@ export const handler: Handler = async (event) => {
 - Motion must feel natural, not artificial or robotic
 - No text, logos, or overlays in the video itself`
 
+      // For Sora: text-to-video mode needs extra detail since no image reference is sent
+      if (modelFamily === 'sora') {
+        systemPrompt += `\n\nIMPORTANT — SORA TEXT-TO-VIDEO MODE:
+Since this will be used in text-to-video mode (no image reference), your prompt MUST include:
+- Extremely detailed visual description of the garment (exact color, material, cut, silhouette, pattern)
+- Specific model appearance (hair, skin tone, body type) that fits the fashion context
+- Complete scene composition — do NOT assume the model can see the product image
+- Every visual detail must be in the text prompt itself
+- Describe the garment as if the reader has never seen it`
+      }
+
       let imageBlock: any
       if (imageUrl.startsWith('data:')) {
         const match = imageUrl.match(/^data:(image\/\w+);base64,(.+)$/)
@@ -652,11 +663,14 @@ Generate a single, production-ready video prompt. Include specific: camera movem
       if (size) soraPayload.size = size
       if (seconds) soraPayload.seconds = String(seconds)
 
-      // Add image reference for image-to-video (Sora uses input_reference with image_url)
-      if (imageUrl) {
+      // Sora input_reference rejects images with human faces (OpenAI policy).
+      // Fashion e-commerce images almost always contain people, so we use
+      // text-to-video mode by default. The Claude-generated prompt already
+      // describes the product in detail based on the image analysis.
+      // Only attach image if explicitly requested AND image has no humans.
+      if (imageUrl && body.forceImageRef) {
         try {
           let dataUrl: string | null = null
-
           if (imageUrl.startsWith('data:')) {
             dataUrl = imageUrl
           } else {
@@ -667,7 +681,6 @@ Generate a single, production-ready video prompt. Include specific: camera movem
               dataUrl = `data:${mimeType};base64,${Buffer.from(buffer).toString('base64')}`
             }
           }
-
           if (dataUrl) {
             soraPayload.input_reference = { image_url: dataUrl }
           }
@@ -677,7 +690,7 @@ Generate a single, production-ready video prompt. Include specific: camera movem
       }
 
       const payload = JSON.stringify(soraPayload)
-      console.log(`[video] sora_submit model=${soraModel || 'sora-2'}, hasImage=${!!soraPayload.input_reference}, size=${size}, seconds=${seconds}`)
+      console.log(`[video] sora_submit model=${soraModel || 'sora-2'}, mode=text-to-video, size=${size}, seconds=${seconds}`)
 
       const result = await httpsRequest({
         hostname: 'api.openai.com',

@@ -47,8 +47,8 @@ const VIDEO_MODELS: { id: VideoModel; emoji: string; label: string; provider: st
   { id: 'veo-3', emoji: '🔵', label: 'Veo 3', provider: 'Google', badge: 'I2V' },
   { id: 'veo-3-fast', emoji: '⚡', label: 'Veo 3 Fast', provider: 'Google', badge: 'I2V' },
   { id: 'minimax-hailuo', emoji: '🟣', label: 'MiniMax Hailuo', provider: 'FAL', badge: 'I2V' },
-  { id: 'sora-2', emoji: '🟠', label: 'Sora 2', provider: 'OpenAI', badge: 'I2V' },
-  { id: 'sora-2-pro', emoji: '🔶', label: 'Sora 2 Pro', provider: 'OpenAI', badge: 'I2V' },
+  { id: 'sora-2', emoji: '🟠', label: 'Sora 2', provider: 'OpenAI', badge: 'T2V' },
+  { id: 'sora-2-pro', emoji: '🔶', label: 'Sora 2 Pro', provider: 'OpenAI', badge: 'T2V' },
 ]
 
 // Sora size options
@@ -349,17 +349,12 @@ export default function VideoAdTool({ addToast }: Props) {
         const soraModelId = videoModel === 'sora-2-pro' ? 'sora-2-pro' : 'sora-2'
         setStatusText(`Sora ${soraModelId} gonderiliyor...`)
 
-        // Resize image to match Sora's expected input size
-        setStatusText('Gorsel Sora boyutuna ayarlaniyor...')
-        const resizedImage = await resizeImageForSora(imageUrl, soraSize)
-
         const soraRes = await fetch('/api/video-generate', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             action: 'sora_submit',
             prompt,
-            imageUrl: resizedImage,
             soraModel: soraModelId,
             size: soraSize,
             seconds: soraSeconds,
@@ -950,7 +945,7 @@ export default function VideoAdTool({ addToast }: Props) {
                   </select>
                 </div>
                 <div style={{ gridColumn: '1 / -1', fontSize: 10, color: 'var(--text-muted)' }}>
-                  Gorsel otomatik olarak secilen cozunurluge yeniden boyutlandirilir (Sora uyumlulugu). Meta icin 5 sn / 9:16 onerilir.
+                  Sora text-to-video modunda calisir (insan iceren gorselleri desteklemez). Claude prompt'a gorsel detaylarini otomatik ekler. Meta icin 4 sn / 9:16 onerilir.
                 </div>
               </div>
             )}
