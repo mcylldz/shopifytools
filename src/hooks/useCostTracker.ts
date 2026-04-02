@@ -16,9 +16,21 @@ const IMAGE_OUTPUT_PRICING: Record<string, number> = {
 // Token bazlı fiyatlar (text input/output — Claude, ve Claude vision analyze)
 const TOKEN_PRICING: Record<string, { input: number; output: number }> = {
   // Claude — per 1M tokens
+  'claude-opus-4-20250514': { input: 15, output: 75 },
   'claude-sonnet-4-20250514': { input: 3, output: 15 },
   'claude-3-5-sonnet-20241022': { input: 3, output: 15 },
   'claude-3-haiku-20240307': { input: 0.25, output: 1.25 },
+}
+
+// Video model fiyatları (per generation)
+const VIDEO_PRICING: Record<string, number> = {
+  'fal:kling-video-v3-pro': 0.35,
+  'fal:minimax-hailuo': 0.25,
+  'veo-2.0-generate-001': 0.50,
+  'veo-3.0-generate-001': 0.75,
+  'veo-3.0-fast-generate-001': 0.50,
+  'sora-2': 1.00,
+  'sora-2-pro': 2.00,
 }
 
 export interface CostData {
@@ -35,6 +47,12 @@ function emptyCost(): CostData {
 const LS_KEY_PREFIX = 'ai_cost_'
 
 export function calculateCost(model: string, inputTokens?: number, outputTokens?: number): number {
+  // Video model pricing (per generation)
+  const videoPrice = VIDEO_PRICING[model]
+  if (videoPrice !== undefined && !inputTokens && !outputTokens) {
+    return videoPrice
+  }
+
   // Fixed per-image pricing (for image generation models)
   const imgPrice = IMAGE_OUTPUT_PRICING[model]
   if (imgPrice !== undefined && !inputTokens && !outputTokens) {
